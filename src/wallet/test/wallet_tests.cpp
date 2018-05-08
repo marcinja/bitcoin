@@ -38,6 +38,9 @@ BOOST_FIXTURE_TEST_CASE(scan_for_wallet_transactions, TestChain100Setup)
 {
     auto chain = interfaces::MakeChain();
 
+    // Avoid the block cache providing blocks
+    gArgs.SoftSetArg("-blockcache", "0");
+
     // Cap last block file size, and mine new block in a new block file.
     const CBlockIndex* const null_block = nullptr;
     CBlockIndex* oldTip = chainActive.Tip();
