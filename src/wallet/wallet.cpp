@@ -1631,8 +1631,8 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const CBlockIndex* const 
                 WalletLogPrintf("Still rescanning. At block %d. Progress=%f\n", pindex->nHeight, progress_current);
             }
 
-            CBlock block;
-            if (ReadBlockFromDisk(block, pindex, Params().GetConsensus())) {
+            std::shared_ptr<const CBlock> block = ReadBlockFromDisk(pindex, Params().GetConsensus());
+            if (block) {
                 auto locked_chain = chain().lock();
                 LOCK(cs_wallet);
                 if (pindex && !chainActive.Contains(pindex)) {
