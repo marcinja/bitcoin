@@ -43,6 +43,32 @@ std::string CTxIn::ToString() const
     return str;
 }
 
+
+bool CTxIn::SpendsNestedPayToWitnessPubKeyHashOutput(CScript spentScriptPubKey) const {
+    if ((!spentScriptPubKey.IsPayToScriptHash()) || this->scriptWitness.IsNull()) {
+        return false;
+    }
+
+    return this->scriptSig.IsNestedPayToWitnessPubKeyHashScriptSig();
+}
+
+bool CTxIn::SpendsNestedPayToWitnessScriptHashOutput(CScript spentScriptPubKey) const {
+    if (!(spentScriptPubKey.IsPayToScriptHash()) || this->scriptWitness.IsNull()) {
+        return false;
+    }
+
+    return this->scriptSig.IsNestedPayToWitnessScriptHashScriptSig();
+}
+
+bool CTxIn::SpendsNativePayToWitnessPubKeyHashOutput(CScript spentScriptPubKey) const {
+    return spentScriptPubKey.IsNativePayToWitnessPubKeyHash();
+}
+
+bool CTxIn::SpendsNativePayToWitnessScriptHashOutput(CScript spentScriptPubKey) const {
+    return spentScriptPubKey.IsPayToWitnessScriptHash();
+}
+
+
 CTxOut::CTxOut(const CAmount& nValueIn, CScript scriptPubKeyIn)
 {
     nValue = nValueIn;
