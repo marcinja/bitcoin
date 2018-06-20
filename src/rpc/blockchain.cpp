@@ -1795,6 +1795,20 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     int64_t txs_creating_p2wpkh_outputs = 0;
     int64_t txs_creating_p2wsh_outputs = 0;
 
+
+    // Fee rates at which we're going to check if new outputs are dust.
+    CFeeRate one_sat = CFeeRate(1 * 1000);
+    CFeeRate four_sat = CFeeRate(4 * 1000);
+    CFeeRate ten_sat = CFeeRate(10 * 1000);
+    CFeeRate fifty_sat = CFeeRate(50 * 1000);
+    CFeeRate one_h_sat = CFeeRate(100 * 1000);
+    CFeeRate two_fifty_sat = CFeeRate(250 * 1000);
+    CFeeRate five_h_sat = CFeeRate(500 * 1000);
+    CFeeRate one_k_sat = CFeeRate(1000 * 1000);
+
+    const int NUM_DUST_BINS = 8;
+    std::vector<int64_t> dustbin_array(8);
+
     for (const auto& tx : block.vtx) {
         outputs += tx->vout.size();
 
@@ -1820,6 +1834,44 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
 
                 // TODO: Do UTXO analysis on spendability and amounts created. Probably with fixed size buckets.
+
+                if (IsDust(out, one_sat)) {
+                    for (int64_t i = 0; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, four_sat)) {
+                    for (int64_t i = 1; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, ten_sat)) {
+                    for (int64_t i = 2; i < NUM_DUST_BINS; ++i) {
+                         ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, fifty_sat)) {
+                    for (int64_t i = 3; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, one_h_sat)) {
+                    for (int64_t i = 4; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, two_fifty_sat)) {
+                    for (int64_t i = 5; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, five_h_sat)) {
+                    for (int64_t i = 6; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, five_h_sat)) {
+                    for (int64_t i = 6; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                } else if (IsDust(out, one_k_sat)) {
+                    for (int64_t i = 7; i < NUM_DUST_BINS; ++i) {
+                        ++dustbin_array[i];
+                    }
+                }
             }
         }
 
@@ -1867,6 +1919,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
             if (!g_txindex) {
                 throw JSONRPCError(RPC_INVALID_PARAMETER, "One or more of the selected stats requires -txindex enabled");
             }
+
             CAmount tx_total_in = 0;
             bool spends_nested_p2wpkh_output = false;
             bool spends_nested_p2wsh_output = false;
@@ -1901,6 +1954,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
                 utxo_size_inc -= GetSerializeSize(prevoutput, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
 
                 // TODO: Do UTXO analysis on spendability and amounts created. Probably with fixed size buckets.
+
             }
 
             if (spends_nested_p2wpkh_output) {
@@ -1977,6 +2031,14 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     ret_all.pushKV("new_p2wsh_outputs", new_p2wsh_outputs);
     ret_all.pushKV("txs_creating_p2wpkh_outputs", txs_creating_p2wpkh_outputs);
     ret_all.pushKV("txs_creating_p2wsh_outputs", txs_creating_p2wsh_outputs);
+    ret_all.pushKV("dust_bins[0]", dustbin_array[0]);
+    ret_all.pushKV("dust_bins[1]", dustbin_array[1]);
+    ret_all.pushKV("dust_bins[2]", dustbin_array[2]);
+    ret_all.pushKV("dust_bins[3]", dustbin_array[3]);
+    ret_all.pushKV("dust_bins[4]", dustbin_array[4]);
+    ret_all.pushKV("dust_bins[5]", dustbin_array[5]);
+    ret_all.pushKV("dust_bins[6]", dustbin_array[6]);
+    ret_all.pushKV("dust_bins[7]", dustbin_array[7]);
 
     if (do_all) {
         return ret_all;
