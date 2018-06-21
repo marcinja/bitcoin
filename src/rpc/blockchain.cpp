@@ -1798,7 +1798,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     const int NUM_DUST_BINS = 8;
 
     // Fee rates at which we're going to check if new outputs are dust.
-    const int dust_fee_rates[NUM_DUST_BINS] = {1*1000, 4*1000, 10*1000, 50*1000, 100*1000, 250*1000, 500*1000, 1000*1000};
+    const CFeeRate dust_fee_rates[NUM_DUST_BINS] = {CFeeRate(1*1000), CFeeRate(4*1000), CFeeRate(10*1000), CFeeRate(50*1000), CFeeRate(100*1000), CFeeRate(250*1000), CFeeRate(500*1000), CFeeRate(1000*1000)};
 
     // Holds number of dust outputs created at each dust_fee_rate.
     int dustbin_array[NUM_DUST_BINS];
