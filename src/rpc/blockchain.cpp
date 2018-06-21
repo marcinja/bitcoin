@@ -1795,19 +1795,13 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     int64_t txs_creating_p2wpkh_outputs = 0;
     int64_t txs_creating_p2wsh_outputs = 0;
 
+    const int NUM_DUST_BINS = 8;
 
     // Fee rates at which we're going to check if new outputs are dust.
-    CFeeRate one_sat = CFeeRate(1 * 1000);
-    CFeeRate four_sat = CFeeRate(4 * 1000);
-    CFeeRate ten_sat = CFeeRate(10 * 1000);
-    CFeeRate fifty_sat = CFeeRate(50 * 1000);
-    CFeeRate one_h_sat = CFeeRate(100 * 1000);
-    CFeeRate two_fifty_sat = CFeeRate(250 * 1000);
-    CFeeRate five_h_sat = CFeeRate(500 * 1000);
-    CFeeRate one_k_sat = CFeeRate(1000 * 1000);
+    const int dust_fee_rates[NUM_DUST_BINS] = {1*1000, 4*1000, 10*1000, 50*1000, 100*1000, 250*1000, 500*1000, 1000*1000};
 
-    const int NUM_DUST_BINS = 8;
-    std::vector<int64_t> dustbin_array(8);
+    // Holds number of dust outputs created at each dust_fee_rate.
+    int dustbin_array[NUM_DUST_BINS];
 
     for (const auto& tx : block.vtx) {
         outputs += tx->vout.size();
@@ -1833,42 +1827,9 @@ static UniValue getblockstats(const JSONRPCRequest& request)
                 utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
 
 
-                // TODO: Do UTXO analysis on spendability and amounts created. Probably with fixed size buckets.
-
-                if (IsDust(out, one_sat)) {
-                    for (int64_t i = 0; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, four_sat)) {
-                    for (int64_t i = 1; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, ten_sat)) {
-                    for (int64_t i = 2; i < NUM_DUST_BINS; ++i) {
-                         ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, fifty_sat)) {
-                    for (int64_t i = 3; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, one_h_sat)) {
-                    for (int64_t i = 4; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, two_fifty_sat)) {
-                    for (int64_t i = 5; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, five_h_sat)) {
-                    for (int64_t i = 6; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, five_h_sat)) {
-                    for (int64_t i = 6; i < NUM_DUST_BINS; ++i) {
-                        ++dustbin_array[i];
-                    }
-                } else if (IsDust(out, one_k_sat)) {
-                    for (int64_t i = 7; i < NUM_DUST_BINS; ++i) {
+                // Check if output is dust at any of the set fee rates.
+                for (int64_t i = 0; i < NUM_DUST_BINS; i++) {
+                    if (IsDust(out, dust_fee_rates[i])) {
                         ++dustbin_array[i];
                     }
                 }
