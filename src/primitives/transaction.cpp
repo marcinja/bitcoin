@@ -61,10 +61,18 @@ bool CTxIn::SpendsNestedPayToWitnessScriptHashOutput(CScript spentScriptPubKey) 
 }
 
 bool CTxIn::SpendsNativePayToWitnessPubKeyHashOutput(CScript spentScriptPubKey) const {
+    if (this->scriptWitness.IsNull()) {
+        return false;
+    }
+
     return spentScriptPubKey.IsNativePayToWitnessPubKeyHash();
 }
 
 bool CTxIn::SpendsNativePayToWitnessScriptHashOutput(CScript spentScriptPubKey) const {
+    if (this->scriptWitness.IsNull()) {
+        return false;
+    }
+
     return spentScriptPubKey.IsPayToWitnessScriptHash();
 }
 
