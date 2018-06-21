@@ -1795,10 +1795,10 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     int64_t txs_creating_p2wpkh_outputs = 0;
     int64_t txs_creating_p2wsh_outputs = 0;
 
-    const int NUM_DUST_BINS = 8;
+    const int NUM_DUST_BINS = 9;
 
     // Fee rates at which we're going to check if new outputs are dust.
-    const CFeeRate dust_fee_rates[NUM_DUST_BINS] = {CFeeRate(1*1000), CFeeRate(4*1000), CFeeRate(10*1000), CFeeRate(50*1000), CFeeRate(100*1000), CFeeRate(250*1000), CFeeRate(500*1000), CFeeRate(1000*1000)};
+    const CFeeRate dust_fee_rates[NUM_DUST_BINS] = {CFeeRate(1*1000), CFeeRate(5*1000), CFeeRate(10*1000), CFeeRate(25*1000),CFeeRate(50*1000), CFeeRate(100*1000), CFeeRate(250*1000), CFeeRate(500*1000), CFeeRate(1000*1000)};
 
     // Holds number of dust outputs created at each dust_fee_rate.
     int dustbin_array[NUM_DUST_BINS];
@@ -2000,6 +2000,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     ret_all.pushKV("dust_bins[5]", dustbin_array[5]);
     ret_all.pushKV("dust_bins[6]", dustbin_array[6]);
     ret_all.pushKV("dust_bins[7]", dustbin_array[7]);
+    ret_all.pushKV("dust_bins[8]", dustbin_array[8]);
 
     if (do_all) {
         return ret_all;
