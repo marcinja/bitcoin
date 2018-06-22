@@ -1705,6 +1705,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
             "  \"new_p2wsh_outputs\": xxxxx,   (numeric) The total number of new P2WSH outputs\n"
             "  \"txs_creating_p2wpkh_outputs\": xxxxx,   (numeric) The total number of new P2WPKH outputs\n"
             "  \"txs_creating_p2wsh_outputs\": xxxxx,   (numeric) The total number of new P2WSH outputs\n"
+            "  \"dust_bins\": xxxxx,   (numeric_array) The total number of outputs that are dust at several fee-rates\n"//TODO: format this as proper JSON
             "}\n"
             "\nExamples:\n"
             + HelpExampleCli("getblockstats", "1000 '[\"minfeerate\",\"avgfeerate\"]'")
@@ -1794,21 +1795,47 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     int64_t new_p2wsh_outputs = 0;
     int64_t txs_creating_p2wpkh_outputs = 0;
     int64_t txs_creating_p2wsh_outputs = 0;
+    int64_t txs_signalling_rbf = 0;
+    int64_t txs_consolidating = 0;
+    int64_t outputs_consolidated = 0;
+    int64_t txs_batching = 0;
 
-    const int NUM_DUST_BINS = 9;
+    const int CONSOLIDATION_THRESHOLD = 3;
 
-    // Fee rates at which we're going to check if new outputs are dust.
-    const CFeeRate dust_fee_rates[NUM_DUST_BINS] = {CFeeRate(1*1000), CFeeRate(5*1000), CFeeRate(10*1000), CFeeRate(25*1000),CFeeRate(50*1000), CFeeRate(100*1000), CFeeRate(250*1000), CFeeRate(500*1000), CFeeRate(1000*1000)};
+    const int BATCHING_THRESHOLD = 3; // If the transaction has at least 3 outputs, it's considered batching.
+    const int NUM_OUTCOUNT_BINS = 7;
 
-    // Holds number of dust outputs created at each dust_fee_rate.
-    int dustbin_array[NUM_DUST_BINS];
+    // Batch ranges =  [(1), (2), (3-4), (5-9), (10-49), (50-99), (100+)]
+    int64_t output_count_bins[NUM_OUTCOUNT_BINS] = {0};
+    const int64_t out_counts[NUM_OUTCOUNT_BINS+1] = {1, 2, 3, 5, 10, 50, 100};
+
+    const int NUM_DUST_BINS = 22;
+    int64_t dustbin_array[NUM_DUST_BINS] = {0};
+    const CFeeRate dust_fee_rates[NUM_DUST_BINS] = {CFeeRate(1*1000), CFeeRate(3*1000), CFeeRate(5*1000), CFeeRate(8*1000), CFeeRate(10*1000), CFeeRate(15*1000), CFeeRate(20*1000), CFeeRate(25*1000), CFeeRate(30*1000), CFeeRate(40*1000), CFeeRate(50*1000), CFeeRate(60*1000), CFeeRate(70*1000), CFeeRate(80*1000), CFeeRate(90*1000),  CFeeRate(100*1000), CFeeRate(150*1000),CFeeRate(200*1000),  CFeeRate(250*1000), CFeeRate(350*1000), CFeeRate(500*1000), CFeeRate(1000*1000)};
 
     for (const auto& tx : block.vtx) {
-        outputs += tx->vout.size();
+        int64_t nOutputs = tx->vout.size();
+        outputs += nOutputs;
+
+        // Place number of outputs for this transaction into the corresponding bin.
+        for (int64_t i = 0; i < NUM_OUTCOUNT_BINS; i++) {
+          if (i == NUM_OUTCOUNT_BINS - 1) {
+              ++output_count_bins[i];
+              break;
+          }
+
+          if (nOutputs >= out_counts[i] &&  nOutputs < out_counts[i+1]) {
+              ++output_count_bins[i];
+              break;
+          }
+        }
+
+        if (nOutputs >= BATCHING_THRESHOLD) {
+            ++txs_batching;
+        }
 
         bool creates_p2wpkh_output = false;
         bool creates_p2wsh_output = false;
-
         CAmount tx_total_out = 0;
         if (loop_outputs) {
             for (const CTxOut& out : tx->vout) {
@@ -1831,6 +1858,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
                 for (int64_t i = 0; i < NUM_DUST_BINS; i++) {
                     if (IsDust(out, dust_fee_rates[i])) {
                         ++dustbin_array[i];
+                        break;
                     }
                 }
             }
@@ -1851,6 +1879,11 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
         inputs += tx->vin.size(); // Don't count coinbase's fake input
         total_out += tx_total_out; // Don't count coinbase reward
+
+        if (tx->vin.size() >= CONSOLIDATION_THRESHOLD) {
+            ++txs_consolidating;
+            outputs_consolidated += tx->vin.size();
+        }
 
         int64_t tx_size = 0;
         if (do_calculate_size) {
@@ -1886,12 +1919,19 @@ static UniValue getblockstats(const JSONRPCRequest& request)
             bool spends_nested_p2wsh_output = false;
             bool spends_native_p2wpkh_output = false;
             bool spends_native_p2wsh_output = false;
+            bool signals_opt_in_rbf = false;
             for (const CTxIn& in : tx->vin) {
                 CTransactionRef tx_in;
                 uint256 hashBlock;
                 if (!GetTransaction(in.prevout.hash, tx_in, Params().GetConsensus(), hashBlock, false)) {
                     throw JSONRPCError(RPC_INTERNAL_ERROR, std::string("Unexpected internal error (tx index seems corrupt)"));
                 }
+
+                // Copied from inner loop of CTransaction::SignalsOptInRBF
+                if (in.nSequence < std::numeric_limits<unsigned int>::max()-1) {
+                    signals_opt_in_rbf = true;
+                }
+
 
                 CTxOut prevoutput = tx_in->vout[in.prevout.n];
 
@@ -1913,9 +1953,10 @@ static UniValue getblockstats(const JSONRPCRequest& request)
 
                 tx_total_in += prevoutput.nValue;
                 utxo_size_inc -= GetSerializeSize(prevoutput, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
+            }
 
-                // TODO: Do UTXO analysis on spendability and amounts created. Probably with fixed size buckets.
-
+            if (signals_opt_in_rbf) {
+                ++txs_signalling_rbf;
             }
 
             if (spends_nested_p2wpkh_output) {
@@ -1949,6 +1990,13 @@ static UniValue getblockstats(const JSONRPCRequest& request)
             minfeerate = std::min(minfeerate, feerate);
         }
     }
+
+    // If an output is dust at fee rate x s.t. x < y, then it is dust at y.
+    for (int64_t i = 0; i < NUM_DUST_BINS - 1; i++) {
+      dustbin_array[i+1] += dustbin_array[i];
+    }
+
+
 
     UniValue ret_all(UniValue::VOBJ);
     ret_all.pushKV("avgfee", (block.vtx.size() > 1) ? totalfee / (block.vtx.size() - 1) : 0);
@@ -1986,12 +2034,30 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     ret_all.pushKV("native_p2wsh_outputs_spent", native_p2wsh_outputs_spent);
     ret_all.pushKV("txs_spending_nested_p2wpkh_outputs", txs_spending_nested_p2wpkh_outputs);
     ret_all.pushKV("txs_spending_nested_p2wsh_outputs", txs_spending_nested_p2wsh_outputs);
-    ret_all.pushKV("txs_spending_native_p2wpkh_outputs", txs_spending_nested_p2wpkh_outputs);
+    ret_all.pushKV("txs_spending_native_p2wpkh_outputs", txs_spending_native_p2wpkh_outputs);
     ret_all.pushKV("txs_spending_native_p2wsh_outputs", txs_spending_native_p2wsh_outputs);
     ret_all.pushKV("new_p2wpkh_outputs", new_p2wpkh_outputs);
     ret_all.pushKV("new_p2wsh_outputs", new_p2wsh_outputs);
     ret_all.pushKV("txs_creating_p2wpkh_outputs", txs_creating_p2wpkh_outputs);
     ret_all.pushKV("txs_creating_p2wsh_outputs", txs_creating_p2wsh_outputs);
+    ret_all.pushKV("txs_signalling_rbf", txs_signalling_rbf);
+    ret_all.pushKV("txs_consolidating", txs_consolidating);
+    ret_all.pushKV("outputs_consolidated", outputs_consolidated);
+    ret_all.pushKV("txs_batching", txs_batching);
+
+    UniValue outcount_res(UniValue::VARR);
+    for (int64_t i = 0; i < NUM_OUTCOUNT_BINS; i++) {
+      outcount_res.push_back(output_count_bins[i]);
+    }
+    ret_all.pushKV("output_count_bins", outcount_res);
+
+    UniValue dust_res(UniValue::VARR);
+    for (int64_t i = 0; i < NUM_DUST_BINS; i++) {
+      dust_res.push_back(dustbin_array[i]);
+    }
+    ret_all.pushKV("dust_bins", dust_res);
+
+    /*
     ret_all.pushKV("dust_bins[0]", dustbin_array[0]);
     ret_all.pushKV("dust_bins[1]", dustbin_array[1]);
     ret_all.pushKV("dust_bins[2]", dustbin_array[2]);
@@ -2001,6 +2067,7 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     ret_all.pushKV("dust_bins[6]", dustbin_array[6]);
     ret_all.pushKV("dust_bins[7]", dustbin_array[7]);
     ret_all.pushKV("dust_bins[8]", dustbin_array[8]);
+    */
 
     if (do_all) {
         return ret_all;
