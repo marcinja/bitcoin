@@ -2057,18 +2057,6 @@ static UniValue getblockstats(const JSONRPCRequest& request)
     }
     ret_all.pushKV("dust_bins", dust_res);
 
-    /*
-    ret_all.pushKV("dust_bins[0]", dustbin_array[0]);
-    ret_all.pushKV("dust_bins[1]", dustbin_array[1]);
-    ret_all.pushKV("dust_bins[2]", dustbin_array[2]);
-    ret_all.pushKV("dust_bins[3]", dustbin_array[3]);
-    ret_all.pushKV("dust_bins[4]", dustbin_array[4]);
-    ret_all.pushKV("dust_bins[5]", dustbin_array[5]);
-    ret_all.pushKV("dust_bins[6]", dustbin_array[6]);
-    ret_all.pushKV("dust_bins[7]", dustbin_array[7]);
-    ret_all.pushKV("dust_bins[8]", dustbin_array[8]);
-    */
-
     if (do_all) {
         return ret_all;
     }
