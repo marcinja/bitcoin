@@ -118,6 +118,7 @@ BITCOIN_CORE_H = \
   httprpc.h \
   httpserver.h \
   index/base.h \
+  index/addrindex.h \
   index/txindex.h \
   indirectmap.h \
   init.h \
@@ -225,6 +226,7 @@ libbitcoin_server_a_SOURCES = \
   httprpc.cpp \
   httpserver.cpp \
   index/base.cpp \
+  index/addrindex.cpp \
   index/txindex.cpp \
   init.cpp \
   dbwrapper.cpp \

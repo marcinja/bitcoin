@@ -9,6 +9,7 @@
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <index/txindex.h>
+#include <index/addrindex.h>
 #include <keystore.h>
 #include <validation.h>
 #include <validationinterface.h>
@@ -170,7 +171,7 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     }
 
     bool f_txindex_ready = false;
-    if (g_txindex && !blockindex) {
+    if (g_txindex  && !blockindex ) {
         f_txindex_ready = g_txindex->BlockUntilSyncedToCurrentChain();
     }
 
@@ -201,6 +202,30 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     if (blockindex) result.pushKV("in_active_chain", in_active_chain);
     TxToJSON(*tx, hash_block, result);
     return result;
+}
+
+
+static UniValue searchrawtransactions(const JSONRPCRequest& request) {
+    const CTxDestination dest = DecodeDestination(request.params[0].get_str());
+    CScript scriptPubKey = GetScriptForDestination(dest);
+
+    bool addr_index_ready = false;
+    if (g_addrindex/* && !blockindex*/) {
+        addr_index_ready = g_addrindex->BlockUntilSyncedToCurrentChain();
+    }
+
+    UniValue ret(UniValue::VOBJ);
+
+    if (false && !addr_index_ready) {
+        return ret;
+    }
+
+    std::vector<std::pair<uint256, CTransactionRef>> txs;
+    g_addrindex->FindTransactionsByDestination(scriptPubKey, txs);
+
+    ret.pushKV("blockhash", txs[0].first.GetUint64(0));
+
+    return ret;
 }
 
 static UniValue gettxoutproof(const JSONRPCRequest& request)
@@ -1365,7 +1390,7 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             "        \"key\" : \"value\"            (key-value pair) An unknown key-value pair\n"
             "         ...\n"
             "      },\n"
-            "    }\n"
+            "    }\n3"
             "    ,...\n"
             "  ]\n"
             "  \"fee\" : fee                      (numeric, optional) The transaction fee paid if all UTXOs slots in the PSBT have been filled.\n"
@@ -1821,6 +1846,8 @@ static const CRPCCommand commands[] =
 
     { "blockchain",         "gettxoutproof",                &gettxoutproof,             {"txids", "blockhash"} },
     { "blockchain",         "verifytxoutproof",             &verifytxoutproof,          {"proof"} },
+
+    { "rawtransactions",    "searchrawtransactions",        &searchrawtransactions,    {"blockhash"} },
 };
 
 void RegisterRawTransactionRPCCommands(CRPCTable &t)
