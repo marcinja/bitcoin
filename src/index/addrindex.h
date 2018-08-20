@@ -32,9 +32,6 @@ private:
     const std::unique_ptr<DB> m_db;
 
 protected:
-    // TODO: remove
-    bool Init() override;
-
     bool WriteBlock(const CBlock& block, const CBlockIndex* pindex) override;
 
     BaseIndex::DB& GetDB() const override;

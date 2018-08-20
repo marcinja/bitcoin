@@ -44,17 +44,32 @@ AddrIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
 
 BaseIndex::DB& AddrIndex::GetDB() const { return *m_db; }
 
+bool AddrIndex::DB::ReadAddrIndex(const uint64_t addr_id, std::vector<CDiskTxPos> &tx_positions) {
+    bool found_tx = false; // return true only if at least one transaction was found
+    std::unique_ptr<CDBIterator> iter(NewIterator());
+
+    iter->Seek(std::make_pair(DB_ADDRINDEX, addr_id));
+    while (iter->Valid()) {
+        std::pair<std::pair<char, uint64_t>, CDiskTxPos> key;
+        if (!iter->GetKey(key)) break;
+
+        if (key.first.first == DB_ADDRINDEX && key.first.second == addr_id) {
+            found_tx = true;
+            tx_positions.emplace_back(key.second);
+        } else {
+            break;
+        }
+
+        iter->Next();
+    }
+
+    return found_tx;
+}
 
 AddrIndex::AddrIndex(size_t n_cache_size, bool f_memory, bool f_wipe)
     : m_db(MakeUnique<AddrIndex::DB>(n_cache_size, f_memory, f_wipe)){}
 
 AddrIndex::~AddrIndex() {}
-
-// TODO: remove
-bool AddrIndex::Init()
-{
-    return BaseIndex::Init();
-}
 
 // called in BlockConnected (base.h/cpp validationinterface)
 bool AddrIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
@@ -90,6 +105,8 @@ bool AddrIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
     return m_db->WriteToIndex(positions);
 }
 
+// TODO implement block disconnected
+
 bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPos>>& positions)
 {
     // TODO: Is there a way to insert with no key instead?
@@ -99,7 +116,7 @@ bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPo
     for (const auto& pos : positions) {
         // Insert (address, position) pair with a small value.
         // Different transactions for the same address will be differentiated
-        // in leveldb by their position suffix.
+        // in leveldb by their CDiskTxPos suffix.
         batch.Write(std::make_pair(std::make_pair(DB_ADDRINDEX, pos.first), pos.second), small_val);
     }
     return WriteBatch(batch);
@@ -107,10 +124,7 @@ bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPo
 
 bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs) 
 {
-    //    uint64_t addr_id = Hash160(GetScriptForDestination(dest)).GetLow64();
-
     CScript scriptPubKey = dest;//GetScriptForDestination(dest);
-
     CSHA256 hasher;
     hasher.Write((unsigned char*)&(*scriptPubKey.begin()), scriptPubKey.end() - scriptPubKey.begin());
     uint256 hashed_script;
@@ -124,7 +138,7 @@ bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<s
 
     // NOTE: optimization: we don't need to keep opening the same file over and over again
     // sort tx_positions by CDiskBlockPos fields (as proxy for sorting by block number)
-    // this way we can ensure each block file is only accessed once 
+    // this way we can ensure each block file is only accessed once
     // Probably not necessary.
 
     for (const auto& tx_pos : tx_positions) {
@@ -142,7 +156,7 @@ bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<s
                 return error("%s: fseek(...) failed", __func__);
             }
             file >> tx;
-            // this way we can ensure each block file is only accessed once 
+            // this way we can ensure each block file is only accessed once
         } catch (const std::exception& e) {
             return error("%s: Deserialize or I/O error - %s", __func__, e.what());
         }
@@ -154,29 +168,8 @@ bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<s
         }
         */
 
-        block_hash = header.GetHash();
-
-        txs.emplace_back(block_hash, tx);
+        txs.emplace_back(header.GetHash(), tx);
     }
 
-    return true;
-}
-
-bool AddrIndex::DB::ReadAddrIndex(const uint64_t addr_id, std::vector<CDiskTxPos> &tx_positions) {
-    CDBIterator *iter = NewIterator();
-
-    iter->Seek(std::make_pair(DB_ADDRINDEX, addr_id));
-    while (iter->Valid()) {
-        std::pair<std::pair<char, uint64_t>, CDiskTxPos> key;
-        if (!iter->GetKey(key)) break;
-
-        if (key.first.first == DB_ADDRINDEX && key.first.second == addr_id) {
-            tx_positions.emplace_back(key.second);
-        } else {
-            break;
-        }
-
-        iter->Next();
-    }
     return true;
 }

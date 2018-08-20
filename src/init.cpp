@@ -228,6 +228,7 @@ void Shutdown()
     peerLogic.reset();
     g_connman.reset();
     g_txindex.reset();
+    g_addrindex.reset();
 
     if (g_is_mempool_loaded && gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
         DumpMempool();
