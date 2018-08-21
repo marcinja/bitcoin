@@ -16,8 +16,9 @@
 
 /**
  * TxIndex is used to look up transactions included in the blockchain by hash.
+ * AddrIndex is used to look up transactions included in the blockchain by script.
  * The index is written to a LevelDB database and records the filesystem
- * location of each transaction by transaction hash.
+ * location of transactions by script.
  */
 
 /**
@@ -47,11 +48,10 @@ public:
 
     /// Lookup transaction(s) by address.
     /// TODO: documentation once API is decided
-    bool FindTransactionsByDestination(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs);
+    bool FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs);
 };
 
-/// TODO decide on the RPC interface that will use this index.
-/// The global address index, used in GetTransactionFromAddress. May be null.
+/// The global address index, used in FindTxsByScript. May be null.
 extern std::unique_ptr<AddrIndex> g_addrindex;
 
 #endif // BITCOIN_INDEX_ADDRINDEX_H

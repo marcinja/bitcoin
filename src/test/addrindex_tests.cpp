@@ -24,7 +24,7 @@ BOOST_FIXTURE_TEST_CASE(addrindex_initial_sync, TestChain100Setup)
     for (const auto& txn : m_coinbase_txns) {
         for (const auto& out : txn->vout) {
             std::vector<std::pair<uint256, CTransactionRef>> txs;
-            BOOST_CHECK(!addr_index.FindTransactionsByDestination(out.scriptPubKey, txs));
+            BOOST_CHECK(!addr_index.FindTxsByScript(out.scriptPubKey, txs));
         }
     }
 
@@ -46,8 +46,8 @@ BOOST_FIXTURE_TEST_CASE(addrindex_initial_sync, TestChain100Setup)
         uint256 tx_hash = txn->GetHash();
         for (const auto& out : txn->vout) {
             std::vector<std::pair<uint256, CTransactionRef>> txs;
-            if (!addr_index.FindTransactionsByDestination(out.scriptPubKey, txs)) {
-                    BOOST_ERROR("FindTransactionsByDestination failed");
+            if (!addr_index.FindTxsByScript(out.scriptPubKey, txs)) {
+                    BOOST_ERROR("FindTxsByScript failed");
             }
 
             // Confirm that the transaction's destination is in the index.
@@ -76,7 +76,7 @@ BOOST_FIXTURE_TEST_CASE(addrindex_initial_sync, TestChain100Setup)
 
         uint256 tx_hash = txn.GetHash();
         std::vector<std::pair<uint256, CTransactionRef>> txs;
-        if (!addr_index.FindTransactionsByDestination(coinbase_script_pub_key, txs)) {
+        if (!addr_index.FindTxsByScript(coinbase_script_pub_key, txs)) {
             BOOST_ERROR("FindTransactionsByDestionation failed");
         }
 
@@ -153,8 +153,8 @@ BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
 
     for (int i = 0; i < 10; i++) {
         std::vector<std::pair<uint256, CTransactionRef>> txs;
-        if (!addr_index.FindTransactionsByDestination(script_pub_keys[i], txs)) {
-            BOOST_ERROR("FindTransactionsByDestination failed");
+        if (!addr_index.FindTxsByScript(script_pub_keys[i], txs)) {
+            BOOST_ERROR("FindTxsByScript failed");
         }
 
         // Expect exactly one transaction the result.
@@ -200,8 +200,8 @@ BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
 
     for (int i = 0; i < 10; i++) {
         std::vector<std::pair<uint256, CTransactionRef>> txs;
-        if (!addr_index.FindTransactionsByDestination(script_pub_keys[i], txs)) {
-            BOOST_ERROR("FindTransactionsByDestination failed");
+        if (!addr_index.FindTxsByScript(script_pub_keys[i], txs)) {
+            BOOST_ERROR("FindTxsByScript failed");
         }
 
         // Expect 2 transasctions for those sent to twice, 1 for the rest.

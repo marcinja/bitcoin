@@ -76,10 +76,11 @@ bool AddrIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
 {
     CDiskTxPos pos(pindex->GetBlockPos(), GetSizeOfCompactSize(block.vtx.size()));
     std::vector<std::pair<uint64_t, CDiskTxPos>> positions;
-    positions.reserve(2 * block.vtx.size()); // NOTE: could profile how tweaking reservation change does anything, but only if vec inserts are more than a blip
+    positions.reserve(2 * block.vtx.size());  // Most transactions have at least 1 input and 1 output.
 
     for (const auto& tx : block.vtx) {
         for (const auto tx_out : tx->vout){
+            // Create key from 64 bits of the hash of the scriptPubKey.
             CSHA256 hasher;
             hasher.Write((unsigned char*)&(*tx_out.scriptPubKey.begin()), tx_out.scriptPubKey.end() - tx_out.scriptPubKey.begin());
             uint256 hashed_script;
@@ -122,7 +123,7 @@ bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPo
     return WriteBatch(batch);
 }
 
-bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs) 
+bool AddrIndex::FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs)
 {
     CScript scriptPubKey = dest;//GetScriptForDestination(dest);
     CSHA256 hasher;
@@ -138,7 +139,8 @@ bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<s
 
     // NOTE: optimization: we don't need to keep opening the same file over and over again
     // sort tx_positions by CDiskBlockPos fields (as proxy for sorting by block number)
-    // this way we can ensure each block file is only accessed once
+    // this way we can ensure each block file is only accessed once and we can seek through
+    // the file in order offsets.
     // Probably not necessary.
 
     for (const auto& tx_pos : tx_positions) {
@@ -160,13 +162,6 @@ bool AddrIndex::FindTransactionsByDestination(const CScript& dest, std::vector<s
         } catch (const std::exception& e) {
             return error("%s: Deserialize or I/O error - %s", __func__, e.what());
         }
-
-        // NOTE: check scriptPubKeys
-        /*
-        if (tx->GetHash() != tx_hash) {
-            return error("%s: txid mismatch", __func__);
-        }
-        */
 
         txs.emplace_back(header.GetHash(), tx);
     }
