@@ -187,6 +187,8 @@ void BaseIndex::BlockConnected(const std::shared_ptr<const CBlock>& block, const
     }
 }
 
+void BaseIndex::BlockDisconnected(const std::shared_ptr<const CBlock> &block) { }
+
 void BaseIndex::ChainStateFlushed(const CBlockLocator& locator)
 {
     if (!m_synced) {
@@ -275,4 +277,9 @@ void BaseIndex::Stop()
     if (m_thread_sync.joinable()) {
         m_thread_sync.join();
     }
+}
+
+
+bool BaseIndex::IsInSyncWithMainChain() const {
+    return m_synced;
 }

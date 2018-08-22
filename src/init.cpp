@@ -1630,8 +1630,6 @@ bool AppInitMain()
         g_addrindex->Start();
     }
 
-
-
     // ********************************************************* Step 9: load wallet
     if (!g_wallet_init_interface.Open()) return false;
 

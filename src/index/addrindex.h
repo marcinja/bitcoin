@@ -37,6 +37,8 @@ protected:
 
     BaseIndex::DB& GetDB() const override;
 
+    void BlockDisconnected(const std::shared_ptr<const CBlock> &block) override;
+
     const char* GetName() const override { return "addrindex"; }
 
 public:
@@ -49,6 +51,9 @@ public:
     /// Lookup transaction(s) by address.
     /// TODO: documentation once API is decided
     bool FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs);
+
+    // Returns part of key used to store information in db.
+    static uint64_t GetAddrID(const CScript& script);
 };
 
 /// The global address index, used in FindTxsByScript. May be null.

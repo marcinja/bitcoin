@@ -4,6 +4,7 @@
 
 #include <hash.h>
 #include <index/addrindex.h>
+#include <index/txindex.h>
 #include <shutdown.h>
 #include <primitives/transaction.h>
 #include <script/standard.h>
@@ -32,9 +33,15 @@ class AddrIndex::DB : public BaseIndex::DB
 public:
     explicit DB(size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
 
+    // Find all entries in the index for addr_id.
     bool ReadAddrIndex(const uint64_t addr_id, std::vector<CDiskTxPos> &tx_positions);
 
-    bool WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPos>> &positions);
+    // Find all keys that have the value of filter, and prefix containing addr_id.
+    void GetKeysWithValueFilter(const uint64_t filter, const uint64_t addr_id, std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> &keys_to_remove);
+
+    bool WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPos>> &positions, const uint256 block_hash);
+
+    void RemoveKeys(const std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> &keys_to_remove);
 };
 
 AddrIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
@@ -66,82 +73,170 @@ bool AddrIndex::DB::ReadAddrIndex(const uint64_t addr_id, std::vector<CDiskTxPos
     return found_tx;
 }
 
+void AddrIndex::DB::GetKeysWithValueFilter(const uint64_t filter, const uint64_t addr_id, std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> &keys_to_remove) {
+    std::unique_ptr<CDBIterator> iter(NewIterator());
+    const std::pair<char, uint64_t> key_prefix = std::make_pair(DB_ADDRINDEX, addr_id);
+
+    iter->Seek(key_prefix);
+    while (iter->Valid()) {
+        std::pair<std::pair<char, uint64_t>, CDiskTxPos> key;
+        uint64_t value;
+        if (!iter->GetKey(key) || !iter->GetValue(value)) break;
+
+        if (key.first.first == key_prefix.first && key.first.second == key_prefix.second) {
+            if (value == filter) {
+                keys_to_remove.emplace_back(key);
+            }
+        } else {
+            break;
+        }
+
+        iter->Next();
+    }
+}
+
+void AddrIndex::DB::RemoveKeys(const std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> &keys_to_remove) {
+    CDBBatch batch(*this);
+    for (const auto& key : keys_to_remove) {
+        batch.Erase(key);
+    }
+    WriteBatch(batch);
+}
+
 AddrIndex::AddrIndex(size_t n_cache_size, bool f_memory, bool f_wipe)
     : m_db(MakeUnique<AddrIndex::DB>(n_cache_size, f_memory, f_wipe)){}
 
 AddrIndex::~AddrIndex() {}
 
-// called in BlockConnected (base.h/cpp validationinterface)
+uint64_t AddrIndex::GetAddrID(const CScript& script) {
+    uint256 hashed_script;
+
+    CSHA256 hasher;
+    hasher.Write((unsigned char*)&(*script.begin()), script.end() - script.begin());
+    hasher.Finalize(hashed_script.begin());
+
+    return hashed_script.GetUint64(0);
+}
+
 bool AddrIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
 {
     CDiskTxPos pos(pindex->GetBlockPos(), GetSizeOfCompactSize(block.vtx.size()));
     std::vector<std::pair<uint64_t, CDiskTxPos>> positions;
     positions.reserve(2 * block.vtx.size());  // Most transactions have at least 1 input and 1 output.
 
-    for (const auto& tx : block.vtx) {
-        for (const auto tx_out : tx->vout){
-            // Create key from 64 bits of the hash of the scriptPubKey.
-            CSHA256 hasher;
-            hasher.Write((unsigned char*)&(*tx_out.scriptPubKey.begin()), tx_out.scriptPubKey.end() - tx_out.scriptPubKey.begin());
-            uint256 hashed_script;
-            hasher.Finalize(hashed_script.begin());
-
-            uint64_t addr_id = hashed_script.GetUint64(0);
-            positions.emplace_back(addr_id, pos);
-        }
-
-        // TODO If tx_index is *also* enabled, look through spends from this address.
-        if (false && !tx->IsCoinBase()) {
-            for (const auto tx_in : tx->vin) {
-                // sipa's original checked scriptPubKey from UTXO set here
-
-                // NOTE: we have a lock on cs_main here from where GetMainsSignal is called
-                // Get CCoinsView here.
+    // Index addresses of spent outputs if txindex is enabled, or if the addrindex
+    // is synced. If synced, we can access the UTXO set instead of txindex.
+    if (IsInSyncWithMainChain()) { // separated out to avoid taking lock many times in loop.
+        LOCK(cs_main);
+        CCoinsViewCache view(pcoinsTip.get());
+        for (const auto& tx : block.vtx) {
+            for (const auto tx_out : tx->vout){
+                positions.emplace_back(GetAddrID(tx_out.scriptPubKey), pos);
             }
-        }
 
-        pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
+            if (!tx->IsCoinBase()) {
+                for (const auto tx_in : tx->vin) {
+                    Coin coin;
+                    view.GetCoin(tx_in.prevout, coin);
+                    positions.emplace_back(GetAddrID(coin.out.scriptPubKey), pos);
+                }
+            }
+            pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
+        }
+    } else {
+        for (const auto& tx : block.vtx) {
+            for (const auto tx_out : tx->vout){
+                positions.emplace_back(GetAddrID(tx_out.scriptPubKey), pos);
+            }
+
+            if (g_txindex && !tx->IsCoinBase()) {
+                for (const auto tx_in : tx->vin) {
+                    CTransactionRef tx;
+                    uint256 block_hash;
+
+                    if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) {
+                        // Both addrindex and txindex may be syncing in parallel, and addrindex might
+                        // be ahead of txindex. We let txindex sync first so that addrindex can continue
+                        // after it.
+                        while (!g_txindex->IsInSyncWithMainChain()) {
+                            MilliSleep(1000); //TODO: find a less arbitrary sleep time.
+                        }
+
+                        // It's also possible we can't find the tx in txindex because it fell behind in
+                        // the ValidationInterface queue. In this case we also let it finish before continuing.
+                        g_txindex->BlockUntilSyncedToCurrentChain();
+
+                        // If we still can't find the tx then a re-org may have happened.
+                        if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) return false;
+                    }
+
+                    CScript script_pub_key = tx->vout[tx_in.prevout.n].scriptPubKey;
+                    positions.emplace_back(GetAddrID(script_pub_key), pos);
+                }
+            }
+
+            pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
+        }
     }
 
-    return m_db->WriteToIndex(positions);
+    return m_db->WriteToIndex(positions, block.GetHash());
 }
 
-// TODO implement block disconnected
-
-bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPos>>& positions)
+bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPos>>& positions, const uint256 block_hash)
 {
-    // TODO: Is there a way to insert with no key instead?
-    constexpr unsigned char small_val = 0x00;
-
     CDBBatch batch(*this);
     for (const auto& pos : positions) {
-        // Insert (address, position) pair with a small value.
+        // Insert (address, position) pair with a part of the block hash.
         // Different transactions for the same address will be differentiated
         // in leveldb by their CDiskTxPos suffix.
-        batch.Write(std::make_pair(std::make_pair(DB_ADDRINDEX, pos.first), pos.second), small_val);
+        batch.Write(std::make_pair(std::make_pair(DB_ADDRINDEX, pos.first), pos.second), block_hash.GetUint64(0));
     }
     return WriteBatch(batch);
 }
 
+
+void AddrIndex::BlockDisconnected(const std::shared_ptr<const CBlock> &block) {
+    const uint64_t block_hash_bits = block->GetHash().GetUint64(0);
+    std::unordered_set<uint64_t> addr_ids_to_remove;
+
+    {
+        LOCK(cs_main);
+        CCoinsViewCache view(pcoinsTip.get());
+
+        // Collect all addr_ids from txs in this block.
+        for (const auto& tx : block->vtx) {
+            for (const auto tx_out : tx->vout){
+                addr_ids_to_remove.emplace(GetAddrID(tx_out.scriptPubKey));
+            }
+
+            if (!tx->IsCoinBase()) {
+                for (const auto tx_in : tx->vin){
+                    Coin coin;
+                    view.GetCoin(tx_in.prevout, coin);
+                    addr_ids_to_remove.emplace(GetAddrID(coin.out.scriptPubKey));
+                }
+            }
+        }
+    }
+
+    std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> keys_to_remove;
+    keys_to_remove.reserve(addr_ids_to_remove.size());
+
+    // Find all keys in the addrindex that pertain to this block using the addr_ids found above.
+    for (const auto addr_id : addr_ids_to_remove) {
+        m_db->GetKeysWithValueFilter(block_hash_bits, addr_id, keys_to_remove);
+    }
+
+    m_db->RemoveKeys(keys_to_remove);
+}
+
 bool AddrIndex::FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs)
 {
-    CScript scriptPubKey = dest;//GetScriptForDestination(dest);
-    CSHA256 hasher;
-    hasher.Write((unsigned char*)&(*scriptPubKey.begin()), scriptPubKey.end() - scriptPubKey.begin());
-    uint256 hashed_script;
-    hasher.Finalize(hashed_script.begin());
-    const uint64_t addr_id = hashed_script.GetUint64(0);
-
+    const uint64_t addr_id = GetAddrID(dest);
     std::vector<CDiskTxPos> tx_positions;
     if (!m_db->ReadAddrIndex(addr_id, tx_positions)) {
         return false;
     }
-
-    // NOTE: optimization: we don't need to keep opening the same file over and over again
-    // sort tx_positions by CDiskBlockPos fields (as proxy for sorting by block number)
-    // this way we can ensure each block file is only accessed once and we can seek through
-    // the file in order offsets.
-    // Probably not necessary.
 
     for (const auto& tx_pos : tx_positions) {
         uint256 block_hash;
@@ -158,7 +253,6 @@ bool AddrIndex::FindTxsByScript(const CScript& dest, std::vector<std::pair<uint2
                 return error("%s: fseek(...) failed", __func__);
             }
             file >> tx;
-            // this way we can ensure each block file is only accessed once
         } catch (const std::exception& e) {
             return error("%s: Deserialize or I/O error - %s", __func__, e.what());
         }

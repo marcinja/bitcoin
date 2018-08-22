@@ -62,6 +62,8 @@ protected:
     void BlockConnected(const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex,
                         const std::vector<CTransactionRef>& txn_conflicted) override;
 
+    void BlockDisconnected(const std::shared_ptr<const CBlock> &block) override;
+
     void ChainStateFlushed(const CBlockLocator& locator) override;
 
     /// Initialize internal state from the database and block index.
@@ -94,6 +96,8 @@ public:
 
     /// Stops the instance from staying in sync with blockchain updates.
     void Stop();
+
+    bool IsInSyncWithMainChain() const;
 };
 
 struct CDiskTxPos : public CDiskBlockPos

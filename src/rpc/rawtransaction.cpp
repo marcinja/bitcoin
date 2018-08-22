@@ -262,16 +262,15 @@ static UniValue searchrawtransactions(const JSONRPCRequest& request) {
 
     const CTxDestination dest = DecodeDestination(request.params[0].get_str());
     if (!IsValidDestination(dest)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address, argument 1 must be a valid address");
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
     }
     CScript scriptPubKey = GetScriptForDestination(dest);
 
     // Accept either a bool (true) or a num (>=1) to indicate verbose output.
-    bool fVerbose = false;
+    bool verbose = false;
     if (!request.params[1].isNull()) {
-        fVerbose = true; //request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
+        verbose = request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
     }
-
 
     int skip = 0;
     int count = 100;
@@ -292,17 +291,23 @@ static UniValue searchrawtransactions(const JSONRPCRequest& request) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "This RPC requires -addrindex to be enabled.");
     }
 
-    g_addrindex->BlockUntilSyncedToCurrentChain();
+    bool addrindex_ready = g_addrindex->BlockUntilSyncedToCurrentChain();
 
     UniValue ret(UniValue::VARR);
     std::vector<std::pair<uint256, CTransactionRef>> result;
     if (!g_addrindex->FindTxsByScript(scriptPubKey, result)) {
+        if (!addrindex_ready) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,"Transactions with given address not found. Blockchain transactions are still in the process of being indexed");
+        }
         return ret;
     }
 
-    for (const auto& tuple : result) {
+    std::vector<std::pair<uint256, CTransactionRef>>::const_iterator it = result.begin();
+    while (it != result.end() && skip--) it++; // Skip first set of results as needed.
+    while (it != result.end() && count--) {
+        const auto& tuple = *it;
         UniValue tx_val(UniValue::VOBJ);
-        if (fVerbose) {
+        if (verbose) {
             TxToJSON(*(tuple.second), tuple.first, tx_val);
         } else {
             std::string hex_tx = EncodeHexTx(*(tuple.second), RPCSerializationFlags());
@@ -310,6 +315,7 @@ static UniValue searchrawtransactions(const JSONRPCRequest& request) {
             tx_val.pushKV("blockhash", tuple.first.GetHex());
         }
         ret.push_back(tx_val);
+        it++;
     }
 
     return ret;
