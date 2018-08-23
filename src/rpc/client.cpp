@@ -152,7 +152,6 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "searchrawtransactions", 1, "verbose" },
     { "searchrawtransactions", 2, "skip" },
     { "searchrawtransactions", 3, "count" },
-    { "createrawtransaction", 0, "inputs" },
     { "setban", 2, "bantime" },
     { "setban", 3, "absolute" },
     { "setnetworkactive", 0, "state" },

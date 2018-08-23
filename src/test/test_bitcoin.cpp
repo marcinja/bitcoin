@@ -6,12 +6,14 @@
 
 #include <chainparams.h>
 #include <consensus/consensus.h>
+#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <crypto/sha256.h>
 #include <validation.h>
 #include <miner.h>
 #include <net_processing.h>
 #include <pow.h>
+#include <random.h>
 #include <ui_interface.h>
 #include <streams.h>
 #include <rpc/server.h>
@@ -169,6 +171,56 @@ TestChain100Setup::CreateAndProcessBlock(const std::vector<CMutableTransaction>&
 
     CBlock result = block;
     return result;
+}
+
+// Based off of BuildChain in validation_block_tests.cpp
+
+// Build a chain of blocks that contains all of the transactions in txns.
+void TestChain100Setup::BuildChain(const uint256 prev_hash, const uint32_t prev_time, int height, std::vector<CMutableTransaction> &txns, const CScript& scriptPubKey, std::vector<std::shared_ptr<const CBlock>>& blocks) {
+    if (height <= 0) return;
+
+    const CChainParams& chainparams = Params();
+    std::unique_ptr<CBlockTemplate> pblocktemplate = BlockAssembler(chainparams).CreateNewBlock(scriptPubKey);
+    CBlock& block = pblocktemplate->block;
+
+    // Replace mempool-selected txns with just coinbase plus some of the passed-in txns:
+    block.vtx.resize(1);
+
+    // If this is the last block, add all remaining transactions.
+    // Otherwise add with some randomness.
+    for (auto it = txns.begin(); it != txns.end();) {
+        bool add_tx = (height == 1) || (GetRandInt(height) < txns.size());
+
+        if (add_tx) {
+            CMutableTransaction tx = *it;
+            block.vtx.push_back(MakeTransactionRef(tx));
+            it = txns.erase(it);
+        } else {
+            it++;
+        }
+    }
+
+    block.hashPrevBlock = prev_hash;
+    block.nTime = prev_time + 1;
+
+    // This is the body of IncrementExtraNonce, modified specifically for this function.
+    // (IncrementExtraNonce creates a valid coinbase and merkleRoot)
+    // Height first in coinbase required for block.version=2
+    unsigned int extraNonce = 1;
+    unsigned int nHeight = chainActive.Tip()->nHeight+1+blocks.size();
+    CMutableTransaction txCoinbase(*block.vtx[0]);
+    txCoinbase.vin[0].scriptSig = (CScript() << nHeight << CScriptNum(extraNonce)) + COINBASE_FLAGS;
+    assert(txCoinbase.vin[0].scriptSig.size() <= 100);
+
+    block.vtx[0] = MakeTransactionRef(std::move(txCoinbase));
+    block.hashMerkleRoot = BlockMerkleRoot(block);
+
+    while (!CheckProofOfWork(block.GetHash(), block.nBits, chainparams.GetConsensus())) ++block.nNonce;
+
+    std::shared_ptr<const CBlock> shared_pblock = std::make_shared<const CBlock>(block);
+    blocks.push_back(shared_pblock);
+
+    BuildChain(blocks.back()->GetHash(), blocks.back()->nTime, height - 1, txns, scriptPubKey, blocks);
 }
 
 TestChain100Setup::~TestChain100Setup()

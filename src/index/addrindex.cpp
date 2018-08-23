@@ -194,7 +194,6 @@ bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPo
     return WriteBatch(batch);
 }
 
-
 void AddrIndex::BlockDisconnected(const std::shared_ptr<const CBlock> &block) {
     const uint64_t block_hash_bits = block->GetHash().GetUint64(0);
     std::unordered_set<uint64_t> addr_ids_to_remove;

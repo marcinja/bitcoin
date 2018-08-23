@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <chainparams.h>
 #include <index/addrindex.h>
 #include <script/standard.h>
 #include <test/test_bitcoin.h>
@@ -30,7 +31,6 @@ BOOST_FIXTURE_TEST_CASE(addrindex_initial_sync, TestChain100Setup)
 
     // BlockUntilSyncedToCurrentChain should return false before addrindex is started.
     BOOST_CHECK(!addr_index.BlockUntilSyncedToCurrentChain());
-
     addr_index.Start();
 
     // Allow addrindex to catch up with the block index.
@@ -99,12 +99,14 @@ BOOST_FIXTURE_TEST_CASE(addrindex_initial_sync, TestChain100Setup)
     }
 }
 
+// Tests for correctness in the event of BlockDisconnected events in the ValidationInterface queue.
+// Creates a small reorg to generate them.
 BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
 {
     AddrIndex addr_index(1 << 20, true);
     addr_index.Start();
 
-    // Mine blocks for coinbase maturity.
+    // Mine blocks for coinbase maturity, so we can spend some coinbase outputs in the test.
     CScript coinbase_script_pub_key = CScript() <<  ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
     for (int i = 0; i < 20; i++) {
         std::vector<CMutableTransaction> no_txns;
@@ -148,9 +150,10 @@ BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
 
     const CBlock& block = CreateAndProcessBlock(spends, coinbase_script_pub_key);
     const uint256 block_hash = block.GetHash();
-    BOOST_CHECK(addr_index.BlockUntilSyncedToCurrentChain());
-    BOOST_CHECK(chainActive.Tip()->GetBlockHash() == block_hash);
+    BOOST_CHECK(addr_index.BlockUntilSyncedToCurrentChain()); // Let the address index catch up.
+    BOOST_CHECK(chainActive.Tip()->GetBlockHash() == block_hash); // Sanity check to make sure this block is actually being used.
 
+    // Now check that all the addresses we sent to are present in the index.
     for (int i = 0; i < 10; i++) {
         std::vector<std::pair<uint256, CTransactionRef>> txs;
         if (!addr_index.FindTxsByScript(script_pub_keys[i], txs)) {
@@ -169,12 +172,12 @@ BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
             }
         }
 
-        if (!found_tx) {
-            BOOST_ERROR("Transaction not found by destination");
-        }
+        if (!found_tx) BOOST_ERROR("Transaction not found by destination");
     }
 
     // Now we'll create transaction that only send to the first 5 addresses we made.
+    // Then we can check that the number of txs for those addresses increases, while
+    // the number of txs for the other address remains the same.
     std::vector<CMutableTransaction> spends2(5);
     for (int i = 0; i < 5; i++) {
         spends2[i].nVersion = 1;
@@ -204,7 +207,7 @@ BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
             BOOST_ERROR("FindTxsByScript failed");
         }
 
-        // Expect 2 transasctions for those sent to twice, 1 for the rest.
+        // Expect 2 transactions for those sent to twice, 1 for the rest.
         if (i >= 5) {
             BOOST_CHECK_EQUAL(txs.size(), 1);
         } else {
@@ -231,7 +234,178 @@ BOOST_FIXTURE_TEST_CASE(addrindex_many_spends, TestChain100Setup)
             BOOST_ERROR("Transaction not found by destination");
         }
     }
-    // TODO: Same test but with every kind of transaction
-
 }
+
+BOOST_FIXTURE_TEST_CASE(addrindex_reorgs, TestChain100Setup)
+{
+    AddrIndex addr_index(1 << 20, true);
+    addr_index.Start();
+
+    uint256 prev_hash;
+    uint32_t prev_time;
+
+    // Mine blocks for coinbase maturity.
+    CScript coinbase_script_pub_key = CScript() <<  ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
+    for (int i = 0; i < 20; i++) {
+        std::vector<CMutableTransaction> no_txns;
+        const CBlock& block = CreateAndProcessBlock(no_txns, coinbase_script_pub_key);
+        prev_hash = block.GetHash();
+        prev_time = block.nTime;
+    }
+
+    // Allow addrindex to catch up with the block index.
+    constexpr int64_t timeout_ms = 10 * 1000;
+    int64_t time_start = GetTimeMillis();
+    while (!addr_index.BlockUntilSyncedToCurrentChain()) {
+        BOOST_REQUIRE(time_start + timeout_ms > GetTimeMillis());
+        MilliSleep(100);
+    }
+
+    // Create several new key pairs to test sending to many different addresses in the same block.
+    std::vector<CKey> priv_keys(10);
+    std::vector<CScript> script_pub_keys(10);
+    for (int i = 0; i < 10; i++) {
+        priv_keys[i].MakeNewKey(true);
+        script_pub_keys[i] = CScript() <<  ToByteVector(priv_keys[i].GetPubKey()) << OP_CHECKSIG;
+    }
+
+    // Create a transaction sending to each of the new addresses.
+    // Copies are made since BuildChain erases txs from its input.
+    std::vector<CMutableTransaction> spends(10);
+    std::vector<CMutableTransaction> fork_one_copy(10);
+    std::vector<CMutableTransaction> fork_two_copy(5);
+    for (int i = 0; i < 10; i++) {
+        spends[i].nVersion = 1;
+        spends[i].vin.resize(1);
+        spends[i].vin[0].prevout.hash = m_coinbase_txns[i]->GetHash();
+        spends[i].vin[0].prevout.n = 0;
+        spends[i].vout.resize(1);
+        spends[i].vout[0].nValue = 11*CENT;
+        spends[i].vout[0].scriptPubKey = script_pub_keys[i];
+
+        // Sign:
+        std::vector<unsigned char> vchSig;
+        const uint256 hash = SignatureHash(coinbase_script_pub_key, spends[i], 0, SIGHASH_ALL, 0, SigVersion::BASE);
+        BOOST_CHECK(coinbaseKey.Sign(hash, vchSig));
+        vchSig.push_back((unsigned char)SIGHASH_ALL);
+        spends[i].vin[0].scriptSig << vchSig;
+
+        // The initial chain gets all txns, and the fork will only have the first half of them.
+        fork_one_copy[i] = spends[i];
+        if (i < 5) {
+            fork_two_copy[i] = spends[i];
+        }
+    }
+
+    // Now we'll make two forks from the same block.
+    // The second will have 5 more blocks, so should be chosen over the first.
+    std::vector<std::shared_ptr<const CBlock>> chain_one;
+    std::vector<std::shared_ptr<const CBlock>> chain_two;
+    BuildChain(prev_hash, prev_time, 10, fork_one_copy, coinbase_script_pub_key, chain_one);
+    BuildChain(prev_hash, prev_time, 15, fork_two_copy, coinbase_script_pub_key, chain_two);
+    BOOST_CHECK_EQUAL(chain_one.size(), 10);
+    BOOST_CHECK_EQUAL(chain_two.size(), 15);
+
+    // As we process the transactions from chain_one, we should accept them all.
+    // This mostly tests that BuildChain gives a valid chain for the purposes of this test.
+    for (int i = 0; i < 10; ++i) {
+        uint256 expected_hash = chain_one[i]->GetHash();
+        ProcessNewBlock(Params(), chain_one[i], true, nullptr);
+        BOOST_CHECK_EQUAL(expected_hash, chainActive.Tip()->GetBlockHash());
+
+        if (i > 0) {
+            BOOST_CHECK_EQUAL(chain_one[i]->hashPrevBlock, chain_one[i-1]->GetHash());
+            BOOST_CHECK(chain_one[i]->GetHash() != chain_one[i-1]->GetHash());
+        }
+    }
+
+    BOOST_CHECK(fork_one_copy.size() == 0);
+    BOOST_CHECK(addr_index.BlockUntilSyncedToCurrentChain());
+
+    // Now check that all the txs we made appear in the index.
+    for (int i = 0; i < 10; i++) {
+        std::vector<std::pair<uint256, CTransactionRef>> txs;
+        if (!addr_index.FindTxsByScript(script_pub_keys[i], txs)) {
+            BOOST_ERROR("FindTxsByScript failed");
+        }
+
+        // Expect exactly one transaction the result.
+        BOOST_CHECK_EQUAL(txs.size(), 1);
+
+        // Confirm that the transaction's destination is in the index.
+        bool found_tx = false;
+        for (const auto& tuple : txs) {
+            BOOST_CHECK(true);
+            if (tuple.second->GetHash() == spends[i].GetHash()) {
+                found_tx = true;
+                break;
+            }
+        }
+
+        if (!found_tx) BOOST_ERROR("Transaction not found by destination");
+    }
+
+    // Now process the fork.
+    for (int i = 0; i < 15; ++i) {
+        uint256 chain_two_hash = chain_two[i]->GetHash();
+        ProcessNewBlock(Params(), chain_two[i], true, nullptr);
+
+        // After 10 blocks have been processed, this should be the main chain.
+        if (i > 9) {
+            BOOST_CHECK_EQUAL(chain_two_hash, chainActive.Tip()->GetBlockHash());
+            BOOST_CHECK_EQUAL(chain_two[i]->hashPrevBlock, chain_two[i-1]->GetHash());
+            BOOST_CHECK(chain_two[i]->GetHash() != chain_two[i-1]->GetHash());
+        } else {
+            // Check that this chain isn't being used yet.
+            BOOST_CHECK(chain_two_hash != chainActive.Tip()->GetBlockHash());
+        }
+    }
+
+    BOOST_CHECK(fork_two_copy.size() == 0);
+    BOOST_CHECK(addr_index.BlockUntilSyncedToCurrentChain());
+
+
+    // Check that transactions from the previous fork have been removed from the index,
+    // and that transactions that stayed in the chain are still in the index.
+    for (int i = 0; i < 10; i++) {
+        std::vector<std::pair<uint256, CTransactionRef>> txs;
+
+        // We expect these txs to show up.
+        if (i < 5) {
+            if (!addr_index.FindTxsByScript(script_pub_keys[i], txs)) {
+                BOOST_ERROR("FindTxsByScript failed");
+            }
+
+            // Expect exactly one transaction the result.
+            BOOST_CHECK_EQUAL(txs.size(), 1);
+
+            // Confirm that the transaction's destination is in the index.
+            bool found_tx = false;
+            for (const auto& tuple : txs) {
+                BOOST_CHECK(true);
+                if (tuple.second->GetHash() == spends[i].GetHash()) {
+                    found_tx = true;
+                    break;
+                }
+            }
+
+            if (!found_tx) {
+                BOOST_ERROR("Transaction not found by destination");
+            }
+        } else {
+            if (addr_index.FindTxsByScript(script_pub_keys[i], txs)) {
+                BOOST_ERROR("FindTxsByScript should not find this tx");
+            }
+        }
+    }
+}
+
+/*
+  TODO:
+  - reorgs
+  - different transaction types
+  - sync w/ txindex (check inputs showing up!)
+  - sync w/o txindex
+ */
+
 BOOST_AUTO_TEST_SUITE_END()
