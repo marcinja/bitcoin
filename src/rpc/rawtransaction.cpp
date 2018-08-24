@@ -260,11 +260,17 @@ static UniValue searchrawtransactions(const JSONRPCRequest& request) {
             " ]\n"
             );
 
+
+    CScript scriptPubKey;
     const CTxDestination dest = DecodeDestination(request.params[0].get_str());
-    if (!IsValidDestination(dest)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+    if(IsValidDestination(dest)) {
+        scriptPubKey = GetScriptForDestination(dest);
+    } else if(IsHex(request.params[0].get_str())) {
+        std::vector<unsigned char> data(ParseHex(request.params[0].get_str()));
+        scriptPubKey = CScript(data.begin(), data.end());
+    } else {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid Bitcoin address or script");
     }
-    CScript scriptPubKey = GetScriptForDestination(dest);
 
     // Accept either a bool (true) or a num (>=1) to indicate verbose output.
     bool verbose = false;

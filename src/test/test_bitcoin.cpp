@@ -17,10 +17,7 @@
 #include <streams.h>
 #include <rpc/server.h>
 #include <rpc/register.h>
-#include <rpc/server.h>
 #include <script/sigcache.h>
-#include <streams.h>
-#include <ui_interface.h>
 #include <validation.h>
 
 const std::function<std::string(const char*)> G_TRANSLATION_FUN = nullptr;
