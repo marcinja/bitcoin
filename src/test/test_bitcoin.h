@@ -96,6 +96,8 @@ struct TestChain100Setup : public TestingSetup {
                     const CScript& scriptPubKey,
                     std::vector<std::shared_ptr<const CBlock>>& blocks);
 
+
+    void CreateSpendingTxs(int coinbase_spent_offset, std::vector<CScript>& script_pub_keys, std::vector<CMutableTransaction> &spends, CScript coinbase_script_pub_key);
     ~TestChain100Setup();
 
     std::vector<CTransactionRef> m_coinbase_txns; // For convenience, coinbase transactions

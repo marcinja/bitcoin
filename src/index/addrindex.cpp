@@ -124,59 +124,39 @@ bool AddrIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
     std::vector<std::pair<uint64_t, CDiskTxPos>> positions;
     positions.reserve(2 * block.vtx.size());  // Most transactions have at least 1 input and 1 output.
 
-    // Index addresses of spent outputs if txindex is enabled, or if the addrindex
-    // is synced. If synced, we can access the UTXO set instead of txindex.
-    if (IsInSyncWithMainChain()) { // separated out to avoid taking lock many times in loop.
-        LOCK(cs_main);
-        CCoinsViewCache view(pcoinsTip.get());
-        for (const auto& tx : block.vtx) {
-            for (const auto tx_out : tx->vout){
-                positions.emplace_back(GetAddrID(tx_out.scriptPubKey), pos);
-            }
-
-            if (!tx->IsCoinBase()) {
-                for (const auto tx_in : tx->vin) {
-                    Coin coin;
-                    view.GetCoin(tx_in.prevout, coin);
-                    positions.emplace_back(GetAddrID(coin.out.scriptPubKey), pos);
-                }
-            }
-            pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
+    // Index addresses of spent outputs if txindex is enabled,
+    for (const auto& tx : block.vtx) {
+        for (const auto tx_out : tx->vout){
+            positions.emplace_back(GetAddrID(tx_out.scriptPubKey), pos);
         }
-    } else {
-        for (const auto& tx : block.vtx) {
-            for (const auto tx_out : tx->vout){
-                positions.emplace_back(GetAddrID(tx_out.scriptPubKey), pos);
-            }
 
-            if (g_txindex && !tx->IsCoinBase()) {
-                for (const auto tx_in : tx->vin) {
-                    CTransactionRef tx;
-                    uint256 block_hash;
+        if (g_txindex && !tx->IsCoinBase()) {
+            for (const auto tx_in : tx->vin) {
+                CTransactionRef tx;
+                uint256 block_hash;
 
-                    if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) {
-                        // Both addrindex and txindex may be syncing in parallel, and addrindex might
-                        // be ahead of txindex. We let txindex sync first so that addrindex can continue
-                        // after it.
-                        while (!g_txindex->IsInSyncWithMainChain()) {
-                            MilliSleep(1000); //TODO: find a less arbitrary sleep time.
-                        }
-
-                        // It's also possible we can't find the tx in txindex because it fell behind in
-                        // the ValidationInterface queue. In this case we also let it finish before continuing.
-                        g_txindex->BlockUntilSyncedToCurrentChain();
-
-                        // If we still can't find the tx then a re-org may have happened.
-                        if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) return false;
+                if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) {
+                    // Both addrindex and txindex may be syncing in parallel, and addrindex might
+                    // be ahead of txindex. We let txindex sync first so that addrindex can continue
+                    // after it.
+                    while (!g_txindex->IsInSyncWithMainChain()) {
+                        MilliSleep(1000); //TODO: find a less arbitrary sleep time.
                     }
 
-                    CScript script_pub_key = tx->vout[tx_in.prevout.n].scriptPubKey;
-                    positions.emplace_back(GetAddrID(script_pub_key), pos);
-                }
-            }
+                    // It's also possible we can't find the tx in txindex because it fell behind in
+                    // the ValidationInterface queue. In this case we also let it finish before continuing.
+                    g_txindex->BlockUntilSyncedToCurrentChain();
 
-            pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
+                    // If we still can't find the tx then a re-org may have happened.
+                    if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) return false;
+                }
+
+                CScript script_pub_key = tx->vout[tx_in.prevout.n].scriptPubKey;
+                positions.emplace_back(GetAddrID(script_pub_key), pos);
+            }
         }
+
+        pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
     }
 
     return m_db->WriteToIndex(positions, block.GetHash());

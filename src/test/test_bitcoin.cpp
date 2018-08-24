@@ -223,6 +223,26 @@ void TestChain100Setup::BuildChain(const uint256 prev_hash, const uint32_t prev_
     BuildChain(blocks.back()->GetHash(), blocks.back()->nTime, height - 1, txns, scriptPubKey, blocks);
 }
 
+void TestChain100Setup::CreateSpendingTxs(int coinbase_spent_offset, std::vector<CScript>& script_pub_keys, std::vector<CMutableTransaction> &spends, CScript coinbase_script_pub_key) {
+    for (unsigned int i = 0; i < spends.size(); i++) {
+        spends[i].nVersion = 1;
+        spends[i].vin.resize(1);
+        spends[i].vin[0].prevout.hash = m_coinbase_txns[i + coinbase_spent_offset]->GetHash();
+        spends[i].vin[0].prevout.n = 0;
+        spends[i].vout.resize(1);
+        spends[i].vout[0].nValue = 11*CENT;
+        spends[i].vout[0].scriptPubKey = script_pub_keys[i];
+
+        // Sign:
+        std::vector<unsigned char> vchSig;
+        const uint256 hash = SignatureHash(coinbase_script_pub_key, spends[i], 0, SIGHASH_ALL, 0, SigVersion::BASE);
+        coinbaseKey.Sign(hash, vchSig);
+        vchSig.push_back((unsigned char)SIGHASH_ALL);
+        spends[i].vin[0].scriptSig << vchSig;
+    }
+}
+
+
 TestChain100Setup::~TestChain100Setup()
 {
 }
