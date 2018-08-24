@@ -9,6 +9,7 @@
 #include <consensus/validation.h>
 #include <core_io.h>
 #include <index/txindex.h>
+#include <index/addrindex.h>
 #include <keystore.h>
 #include <validation.h>
 #include <validationinterface.h>
@@ -201,6 +202,123 @@ static UniValue getrawtransaction(const JSONRPCRequest& request)
     if (blockindex) result.pushKV("in_active_chain", in_active_chain);
     TxToJSON(*tx, hash_block, result);
     return result;
+}
+
+static UniValue searchrawtransactions(const JSONRPCRequest& request) {
+    if (request.fHelp || request.params.size() < 1 || request.params.size() > 4)
+        throw std::runtime_error(
+            "searchrawtransactions <address> [verbose=true] [skip=0] [count=100]\n"
+            "\nReturns raw transactions that contain the given address and the hash of the block(s) they were found in.\n"
+            "\nRequires -addrindex to be enabled.\n"
+            "\nArguments:\n"
+            "1. \"address\"    (string, required) The address to search for\n"
+            "2. \"verbose\"    (bool, optional, default = false) If set to false, only returns data for hex-encoded `txid`s. \n"
+            "3. \"skip\"       (numeric, optional, default = 0) If set, the result skips this number of initial values. \n"
+            "3. \"count\"      (numeric, optional, default = 100) If set, the result will only contain this amount of values. \n"
+            "\nResult:\n"
+            " [                                    (array of json objects)\n"
+            "   {\n"
+            "      \"hex\" : \"data\",             (string) The serialized, hex-encoded data for 'txid'\n"
+            "      \"txid\" : \"id\",              (string) The transaction id (same as provided)\n"
+            "      \"hash\" : \"id\",              (string) The transaction hash (differs from txid for witness transactions)\n"
+            "      \"size\" : n,                   (numeric) The serialized transaction size\n"
+            "      \"vsize\" : n,                  (numeric) The virtual transaction size (differs from size for witness transactions)\n"
+            "      \"weight\" : n,                 (numeric) The transaction's weight (between vsize*4-3 and vsize*4)\n"
+            "      \"version\" : n,                (numeric) The version\n"
+            "      \"locktime\" : ttt,             (numeric) The lock time\n"
+            "      \"vin\" : [                     (array of json objects)\n"
+            "        {\n"
+            "          \"txid\": \"id\",           (string) The transaction id\n"
+            "          \"vout\": n,                (numeric) \n"
+            "          \"scriptSig\": {            (json object) The script\n"
+            "            \"asm\": \"asm\",         (string) asm\n"
+            "            \"hex\": \"hex\"          (string) hex\n"
+            "        },\n"
+            "      \"sequence\": n                 (numeric) The script sequence number\n"
+            "      \"txinwitness\": [\"hex\", ...] (array of string) hex-encoded witness data (if any)\n"
+            "    }\n"
+            "    ,...\n"
+            "    \"vout\" : [                       (array of json objects)\n"
+            "       {\n"
+            "         \"value\" : x.xxx,            (numeric) The value in " + CURRENCY_UNIT + "\n"
+            "         \"n\" : n,                    (numeric) index\n"
+            "         \"scriptPubKey\" : {          (json object)\n"
+            "           \"asm\" : \"asm\",          (string) the asm\n"
+            "           \"hex\" : \"hex\",          (string) the hex\n"
+            "           \"reqSigs\" : n,            (numeric) The required sigs\n"
+            "           \"type\" : \"pubkeyhash\",  (string) The type, eg 'pubkeyhash'\n"
+            "           \"addresses\" : [           (json array of string)\n"
+            "             \"address\"               (string) bitcoin address\n"
+            "             ,...\n"
+            "           ]\n"
+            "         }\n"
+            "       }\n"
+            "       ,...\n"
+            "    ],\n"
+            "    \"blockhash\" : \"hash\",         (string) the block hash\n"
+            "  }\n"
+            " ]\n"
+            );
+
+    const CTxDestination dest = DecodeDestination(request.params[0].get_str());
+    if (!IsValidDestination(dest)) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+    }
+    CScript scriptPubKey = GetScriptForDestination(dest);
+
+    // Accept either a bool (true) or a num (>=1) to indicate verbose output.
+    bool verbose = false;
+    if (!request.params[1].isNull()) {
+        verbose = request.params[1].isNum() ? (request.params[1].get_int() != 0) : request.params[1].get_bool();
+    }
+
+    int skip = 0;
+    int count = 100;
+    if (request.params.size() > 2) {
+        if (!request.params[2].isNum()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, argument 3 must be an integer");
+        }
+        skip = request.params[2].get_int();
+    }
+    if (request.params.size() > 3) {
+        if (!request.params[3].isNum()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, argument 4 must be an integer");
+        }
+        count = request.params[3].get_int();
+    }
+
+    if (!g_addrindex) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "This RPC requires -addrindex to be enabled.");
+    }
+
+    bool addrindex_ready = g_addrindex->BlockUntilSyncedToCurrentChain();
+
+    UniValue ret(UniValue::VARR);
+    std::vector<std::pair<uint256, CTransactionRef>> result;
+    if (!g_addrindex->FindTxsByScript(scriptPubKey, result)) {
+        if (!addrindex_ready) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,"Transactions with given address not found. Blockchain transactions are still in the process of being indexed");
+        }
+        return ret;
+    }
+
+    std::vector<std::pair<uint256, CTransactionRef>>::const_iterator it = result.begin();
+    while (it != result.end() && skip--) it++; // Skip first set of results as needed.
+    while (it != result.end() && count--) {
+        const auto& tuple = *it;
+        UniValue tx_val(UniValue::VOBJ);
+        if (verbose) {
+            TxToJSON(*(tuple.second), tuple.first, tx_val);
+        } else {
+            std::string hex_tx = EncodeHexTx(*(tuple.second), RPCSerializationFlags());
+            tx_val.pushKV("hex", hex_tx);
+            tx_val.pushKV("blockhash", tuple.first.GetHex());
+        }
+        ret.push_back(tx_val);
+        it++;
+    }
+
+    return ret;
 }
 
 static UniValue gettxoutproof(const JSONRPCRequest& request)
@@ -1803,6 +1921,7 @@ static const CRPCCommand commands[] =
 { //  category              name                            actor (function)            argNames
   //  --------------------- ------------------------        -----------------------     ----------
     { "rawtransactions",    "getrawtransaction",            &getrawtransaction,         {"txid","verbose","blockhash"} },
+    { "rawtransactions",    "searchrawtransactions",        &searchrawtransactions,    {"address", "verbose", "skip", "count"} },
     { "rawtransactions",    "createrawtransaction",         &createrawtransaction,      {"inputs","outputs","locktime","replaceable"} },
     { "rawtransactions",    "decoderawtransaction",         &decoderawtransaction,      {"hexstring","iswitness"} },
     { "rawtransactions",    "decodescript",                 &decodescript,              {"hexstring"} },
