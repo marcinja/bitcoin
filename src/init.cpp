@@ -1626,6 +1626,8 @@ bool AppInitMain()
     }
 
     if (gArgs.GetBoolArg("-addrindex", DEFAULT_ADDRINDEX)) {
+        if (!g_txindex)
+            InitWarning(_("-txindex must be enabled for -addrindex to index spends from addresses."));
         g_addrindex = MakeUnique<AddrIndex>(nAddrIndexCache, false, fReindex);
         g_addrindex->Start();
     }
