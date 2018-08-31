@@ -14,6 +14,10 @@
 #include <script/standard.h>
 #include <script/script.h>
 
+using AddrId = uint64_t;
+using DbKey = std::pair<std::pair<char, AddrID>, COutPoint>;
+using DbValue = CScript;
+
 /**
  * AddrIndex is used to look up transactions included in the blockchain by script.
  * The index is written to a LevelDB database and records the filesystem
@@ -26,6 +30,9 @@ protected:
 
 private:
     const std::unique_ptr<DB> m_db;
+
+    // Returns part of key used to store information in db.
+    static AddrId GetAddrID(const CScript& script);
 
 protected:
     bool WriteBlock(const CBlock& block, const CBlockIndex* pindex) override;
@@ -46,11 +53,10 @@ public:
     /// Lookup transaction(s) by scriptPubKey. Fills txs vector with (block_hash, tx) pairs.
     bool FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs);
 
-    // Returns part of key used to store information in db.
-    static uint64_t GetAddrID(const CScript& script);
 };
 
 /// The global address index, used in FindTxsByScript. May be null.
 extern std::unique_ptr<AddrIndex> g_addrindex;
 
 #endif // BITCOIN_INDEX_ADDRINDEX_H
+ 

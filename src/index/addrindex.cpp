@@ -51,23 +51,43 @@ AddrIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
 
 BaseIndex::DB& AddrIndex::GetDB() const { return *m_db; }
 
-bool AddrIndex::DB::ReadAddrIndex(const uint64_t addr_id,
-                                  std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> &keys_found,
-                                  const bool filter_by_value,
-                                  const uint64_t value_wanted){
+
+/*
+
+  key_prefix = DBADDRINDEX | S/R (spent/received), addr_id
+
+  options:
+
+  key: key_prefix, outpoint
+  value:  CScript (to check key)
+
+  cons: implicit dependency on txindex to do the full tx lookup
+
+  key: key_prefix, outpoint
+  value:  block_hash, CScript (to check key)
+
+  pros: can getrawtransaction using this
+
+  key
+
+ */
+
+bool AddrIndex::DB::ReadAddrIndex(const CScript& script) {
     bool found_tx = false; // return true only if at least one transaction was found
-    const std::pair<char, uint64_t> key_prefix = std::make_pair(DB_ADDRINDEX, addr_id);
+    const std::pair<char, AddrId> key_prefix = std::make_pair(DB_ADDRINDEX, addr_id);
     std::unique_ptr<CDBIterator> iter(NewIterator());
 
     iter->Seek(key_prefix);
     while (iter->Valid()) {
-        std::pair<std::pair<char, uint64_t>, CDiskTxPos> key;
-        uint64_t value;
-        if (!iter->GetKey(key) || !iter->GetValue(value) || key.first != key_prefix) break;
+        DbKey key;
+        DbValue value;
+        if (!iter->GetKey(key) || key.first != key_prefix || !iter->GetValue(value)) break;
 
-        if  (!filter_by_value || (filter_by_value && value == value_wanted)) {
+        if (value == script) {
             found_tx = true;
             keys_found.emplace_back(key);
+        } else {
+            break;
         }
 
         iter->Next();
@@ -76,71 +96,53 @@ bool AddrIndex::DB::ReadAddrIndex(const uint64_t addr_id,
     return found_tx;
 }
 
-void AddrIndex::DB::RemoveKeys(const std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> &keys_to_remove) {
-    CDBBatch batch(*this);
-    for (const auto& key : keys_to_remove) {
-        batch.Erase(key);
-    }
-    WriteBatch(batch);
-}
-
 AddrIndex::AddrIndex(size_t n_cache_size, bool f_memory, bool f_wipe)
     : m_db(MakeUnique<AddrIndex::DB>(n_cache_size, f_memory, f_wipe)){}
 
 AddrIndex::~AddrIndex() {}
 
-uint64_t AddrIndex::GetAddrID(const CScript& script) {
-    uint256 hashed_script;
+// TODO: how to set siphasher seed?
+// TODO: save in the database as key = "SIPHASHSEED", value = std:pair<seed0, seed1>
+// initialize as randomness
+static constexpr uint64_t seed0 = 1337;
+static constexpr uint64_t seed1 = 1337 << 9;
 
-    CSHA256 hasher;
-    hasher.Write((unsigned char*)&(*script.begin()), script.end() - script.begin());
-    hasher.Finalize(hashed_script.begin());
-
-    return hashed_script.GetUint64(0);
+AddrId AddrIndex::GetAddrID(const CScript& script) {
+    return CSipHasher(seed0, seed1).Write(script).Finalize();
 }
 
 bool AddrIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
 {
-    CDiskTxPos pos(pindex->GetBlockPos(), GetSizeOfCompactSize(block.vtx.size()));
-    std::vector<std::pair<uint64_t, CDiskTxPos>> positions;
-    positions.reserve(2 * block.vtx.size());  // Most transactions have at least 1 input and 1 output.
-
-    // Index addresses of spent outputs if txindex is enabled,
+    std::vector<std::pair<DbKey, DbValue> new_db_entries;
     for (const auto& tx : block.vtx) {
-        for (const auto tx_out : tx->vout){
-            positions.emplace_back(GetAddrID(tx_out.scriptPubKey), pos);
+        const uint256 tx_hash = tx.GetHash();
+
+        if (tx->vout.empty()) continue;
+
+        for (unsigned int i = 0; i < tx->vout.size(); i++) {
+            const AddrId addr_id = GetAddrID(tx->vout[i].scriptPubKey);
+            const COutPoint outpoint = COutPoint(tx_hash, static_cast<uint32_t>(i));
+            const DbKey new_key = std::make_pair(std::make_pair(DB_ADDRINDEX, addr_id), outpoint);
+
+            new_db_entries.emplace_back(new_key, tx->vout[i].scriptPubKey);
         }
-
-        if (g_txindex && !tx->IsCoinBase()) {
-            for (const auto tx_in : tx->vin) {
-                CTransactionRef tx;
-                uint256 block_hash;
-
-                if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) {
-                    // Both addrindex and txindex may be syncing in parallel, and addrindex might
-                    // be ahead of txindex. We let txindex sync first so that addrindex can continue
-                    // after it.
-                    while (!g_txindex->IsInSyncWithMainChain()) {
-                        MilliSleep(1000); //TODO: find a less arbitrary sleep time.
-                    }
-
-                    // It's also possible we can't find the tx in txindex because it fell behind in
-                    // the ValidationInterface queue. In this case we also let it finish before continuing.
-                    g_txindex->BlockUntilSyncedToCurrentChain();
-
-                    // If we still can't find the tx then a re-org may have happened.
-                    if (!g_txindex->FindTx(tx_in.prevout.hash, block_hash, tx)) return false;
-                }
-
-                CScript script_pub_key = tx->vout[tx_in.prevout.n].scriptPubKey;
-                positions.emplace_back(GetAddrID(script_pub_key), pos);
-            }
-        }
-
-        pos.nTxOffset += ::GetSerializeSize(*tx, SER_DISK, CLIENT_VERSION);
     }
 
-    return m_db->WriteToIndex(positions, block.GetHash());
+    // TODO: use block_undo to index spends in future commit
+
+    return m_db->WriteToIndex(new_db_entries);
+}
+
+
+bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<DbKey, DbValue>>& entries) {
+    CDBBatch batch(*this);
+    for (const auto& kv : entries) {
+        // Insert (address, position) pair with a part of the block hash.
+        // Different transactions for the same address will be differentiated
+        // in leveldb by their CDiskTxPos suffix.
+        batch.Write(kv.first, kv.second);
+    }
+    return WriteBatch(batch);
 }
 
 bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPos>>& positions, const uint256 block_hash)
@@ -153,42 +155,6 @@ bool AddrIndex::DB::WriteToIndex(const std::vector<std::pair<uint64_t, CDiskTxPo
         batch.Write(std::make_pair(std::make_pair(DB_ADDRINDEX, pos.first), pos.second), block_hash.GetUint64(0));
     }
     return WriteBatch(batch);
-}
-
-void AddrIndex::BlockDisconnected(const std::shared_ptr<const CBlock> &block) {
-    const uint64_t block_hash_bits = block->GetHash().GetUint64(0);
-    std::unordered_set<uint64_t> addr_ids_to_remove;
-
-    {
-        LOCK(cs_main);
-        CCoinsViewCache view(pcoinsTip.get());
-
-        // Collect all addr_ids from txs in this block.
-        for (const auto& tx : block->vtx) {
-            for (const auto tx_out : tx->vout){
-                addr_ids_to_remove.emplace(GetAddrID(tx_out.scriptPubKey));
-            }
-
-            if (!tx->IsCoinBase()) {
-                for (const auto tx_in : tx->vin){
-                    Coin coin;
-                    if (view.GetCoin(tx_in.prevout, coin)) {
-                        addr_ids_to_remove.emplace(GetAddrID(coin.out.scriptPubKey));
-                    }
-                }
-            }
-        }
-    }
-
-    std::vector<std::pair<std::pair<char, uint64_t>, CDiskTxPos>> keys_to_remove;
-    keys_to_remove.reserve(addr_ids_to_remove.size());
-
-    // Find all keys in the addrindex that pertain to this block using the addr_ids found above.
-    for (const auto addr_id : addr_ids_to_remove) {
-        m_db->ReadAddrIndex(addr_id, keys_to_remove, true, block_hash_bits);
-    }
-
-    m_db->RemoveKeys(keys_to_remove);
 }
 
 bool AddrIndex::FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs)
