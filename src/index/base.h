@@ -12,6 +12,7 @@
 #include <threadinterrupt.h>
 #include <uint256.h>
 #include <validationinterface.h>
+#include <index/disktxpos.h>
 
 class CBlockIndex;
 
@@ -98,31 +99,6 @@ public:
     void Stop();
 
     bool IsInSyncWithMainChain() const;
-};
-
-struct CDiskTxPos : public CDiskBlockPos
-{
-    unsigned int nTxOffset; // after header
-
-    ADD_SERIALIZE_METHODS;
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream& s, Operation ser_action) {
-        READWRITEAS(CDiskBlockPos, *this);
-        READWRITE(VARINT(nTxOffset));
-    }
-
-    CDiskTxPos(const CDiskBlockPos &blockIn, unsigned int nTxOffsetIn) : CDiskBlockPos(blockIn.nFile, blockIn.nPos), nTxOffset(nTxOffsetIn) {
-    }
-
-    CDiskTxPos() {
-        SetNull();
-    }
-
-    void SetNull() {
-        CDiskBlockPos::SetNull();
-        nTxOffset = 0;
-    }
 };
 
 #endif // BITCOIN_INDEX_BASE_H

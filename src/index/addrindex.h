@@ -7,15 +7,16 @@
 
 #include <chain.h>
 #include <index/base.h>
+#include <index/addrindexkeys.h>
 #include <vector>
+#include <tuple>
+#include <random.h>
 #include <txdb.h>
 #include <uint256.h>
 #include <primitives/transaction.h>
 #include <script/standard.h>
 #include <script/script.h>
 
-using AddrId = uint64_t;
-using DbKey = std::pair<std::pair<char, AddrID>, COutPoint>;
 using DbValue = CScript;
 
 /**
@@ -31,15 +32,18 @@ protected:
 private:
     const std::unique_ptr<DB> m_db;
 
-    // Returns part of key used to store information in db.
-    static AddrId GetAddrID(const CScript& script);
+    uint64_t m_hash_seed;
 
-protected:
+    // Returns part of key used to store information for this script.
+    AddrId GetAddrID(const CScript& script);
+
+ protected:
+    /// Override base class init to set Siphash seeds.
+    bool Init() override;
+
     bool WriteBlock(const CBlock& block, const CBlockIndex* pindex) override;
 
     BaseIndex::DB& GetDB() const override;
-
-    void BlockDisconnected(const std::shared_ptr<const CBlock> &block) override;
 
     const char* GetName() const override { return "addrindex"; }
 
@@ -50,9 +54,15 @@ public:
     // Destructor is declared because this class contains a unique_ptr to an incomplete type.
     virtual ~AddrIndex() override;
 
-    /// Lookup transaction(s) by scriptPubKey. Fills txs vector with (block_hash, tx) pairs.
-    bool FindTxsByScript(const CScript& dest, std::vector<std::pair<uint256, CTransactionRef>> &txs);
+    /// Lookup outpoints by scriptPubKey.
+    bool FindOutPointsByScript(const CScript& script, std::vector<COutPoint> &outpoints);
 
+
+    bool FindTxsByScript(const CScript& dest, std::vector<CTransactionRef>
+    &txs);
+
+    // Get everything. 
+    bool FindOutPointsAndTxsByScript(const CScript& dest, std::vector<std::pair<COutPoint, CTransactionRef>> &result);
 };
 
 /// The global address index, used in FindTxsByScript. May be null.
