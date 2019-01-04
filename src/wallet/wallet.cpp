@@ -1641,8 +1641,8 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const CBlockIndex* const 
                     failed_block = pindex;
                     break;
                 }
-                for (size_t posInBlock = 0; posInBlock < block.vtx.size(); ++posInBlock) {
-                    SyncTransaction(block.vtx[posInBlock], pindex, posInBlock, fUpdate);
+                for (size_t posInBlock = 0; posInBlock < block->vtx.size(); ++posInBlock) {
+                    SyncTransaction(block->vtx[posInBlock], pindex, posInBlock, fUpdate);
                 }
                 // scan succeeded, record block as most recent successfully scanned
                 stop_block = pindex;
