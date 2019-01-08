@@ -1004,24 +1004,22 @@ bool GetTransaction(const uint256& hash, CTransactionRef& txOut, const Consensus
 {
     CBlockIndex* pindexSlow = blockIndex;
 
-    {
-        LOCK(cs_main);
+    LOCK(cs_main);
 
-        if (!blockIndex) {
-            CTransactionRef ptx = mempool.get(hash);
-            if (ptx) {
-                txOut = ptx;
-                return true;
-            }
+    if (!blockIndex) {
+        CTransactionRef ptx = mempool.get(hash);
+        if (ptx) {
+            txOut = ptx;
+            return true;
+        }
 
-            if (g_txindex) {
-                return g_txindex->FindTx(hash, hashBlock, txOut);
-            }
+        if (g_txindex) {
+            return g_txindex->FindTx(hash, hashBlock, txOut);
+        }
 
-            if (fAllowSlow) { // use coin database to locate block that contains transaction, and scan it
+        if (fAllowSlow) { // use coin database to locate block that contains transaction, and scan it
                 const Coin& coin = AccessByTxid(*pcoinsTip, hash);
                 if (!coin.IsSpent()) pindexSlow = chainActive[coin.nHeight];
-            }
         }
     }
 
