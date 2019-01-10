@@ -80,6 +80,35 @@ namespace {
     };
 } // anon namespace
 
+namespace {
+    struct CBlockIndexHeightWorkComparator
+    {
+        bool operator()(const CBlockIndex *pa, const CBlockIndex *pb) const {
+            // First sort by height, ...
+            if (pa->nHeight > pb->nHeight) return false;
+            if (pa->nHeight < pb->nHeight) return true;
+
+            // First sort by most total work, ...
+            if (pa->nChainWork > pb->nChainWork) return false;
+            if (pa->nChainWork < pb->nChainWork) return true;
+
+            // ... then by earliest time received, ...
+            if (pa->nSequenceId < pb->nSequenceId) return false;
+            if (pa->nSequenceId > pb->nSequenceId) return true;
+
+            // Use pointer address as tie breaker (should only happen with blocks
+            // loaded from disk, as those all have id 0).
+            if (pa < pb) return false;
+            if (pa > pb) return true;
+
+            // Identical blocks.
+            return false;
+        }
+    };
+} // anon namespace
+
+
+
 enum DisconnectResult
 {
     DISCONNECT_OK,      // All good.
@@ -275,7 +304,7 @@ namespace {
 
     CCriticalSection g_cs_full_block_cache;
     /** Rolling cache of CBlocks recently written to disk */
-    std::map<const CBlockIndex*, std::shared_ptr<const CBlock>, CBlockIndexWorkComparator> g_full_block_cache GUARDED_BY(g_cs_full_block_cache);
+    std::map<const CBlockIndex*, std::shared_ptr<const CBlock>, CBlockIndexHeightWorkComparator> g_full_block_cache GUARDED_BY(g_cs_full_block_cache);
     /** In-memory size of g_full_block_cache */
     size_t g_full_block_cache_size GUARDED_BY(g_cs_full_block_cache) = 0;
 } // anon namespace
