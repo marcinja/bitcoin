@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <util/system.h>
+#include <valgrind/callgrind.h>
 
 namespace interfaces {
 class Chain;

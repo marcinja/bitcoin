@@ -32,6 +32,8 @@
 
 #include <atomic>
 
+#include <valgrind/callgrind.h>
+
 class CBlockIndex;
 class CBlockTreeDB;
 class CChainParams;

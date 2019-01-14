@@ -160,6 +160,8 @@ void Interrupt()
 
 void Shutdown(InitInterfaces& interfaces)
 {
+    CALLGRIND_STOP_INSTRUMENTATION;
+
     LogPrintf("%s: In progress...\n", __func__);
     static CCriticalSection cs_Shutdown;
     TRY_LOCK(cs_Shutdown, lockShutdown);
@@ -1689,6 +1691,10 @@ bool AppInitMain(InitInterfaces& interfaces)
     if (gArgs.GetBoolArg("-upnp", DEFAULT_UPNP)) {
         StartMapPort();
     }
+
+    // Start instrumentation and toggle to off.
+    CALLGRIND_START_INSTRUMENTATION;
+    CALLGRIND_TOGGLE_COLLECT;
 
     CConnman::Options connOptions;
     connOptions.nLocalServices = nLocalServices;

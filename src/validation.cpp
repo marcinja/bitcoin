@@ -2554,7 +2554,9 @@ bool CChainState::ConnectTip(CValidationState& state, const CChainParams& chainp
     int64_t nTime1 = GetTimeMicros();
     std::shared_ptr<const CBlock> pthisBlock;
     if (!pblock) {
+        CALLGRIND_TOGGLE_COLLECT;
         pthisBlock = ReadBlockFromDisk(pindexNew, chainparams.GetConsensus());
+        CALLGRIND_TOGGLE_COLLECT;
         if (!pthisBlock) {
             return AbortNode(state, "Failed to read block");
         }
