@@ -1349,10 +1349,13 @@ static std::shared_ptr<const CBlock> ReadBlockFromDiskNoCache(const CDiskBlockPo
     return block;
 }
 
+static int fb_cache_hits = 0;
 static std::shared_ptr<const CBlock> GetBlockFromFBCache(const CBlockIndex* pindex) {
+
         LOCK(g_cs_full_block_cache);
         auto it = g_full_block_cache.find(pindex);
         if (it != g_full_block_cache.end()) {
+            ++fb_cache_hits;
             return it->second;
         } else {
             return nullptr;
@@ -2579,7 +2582,7 @@ bool CChainState::ConnectTip(CValidationState& state, const CChainParams& chainp
     // Apply the block atomically to the chain state.
     int64_t nTime2 = GetTimeMicros(); nTimeReadFromDisk += nTime2 - nTime1;
     int64_t nTime3;
-    LogPrint(BCLog::BENCH, "  - Load block from disk: %.2fms [%.2fs]\n", (nTime2 - nTime1) * MILLI, nTimeReadFromDisk * MICRO);
+    LogPrint(BCLog::BENCH, "  - Load block from disk: %.2fms [%.2fs] (fb_cache_hits: %d)\n", (nTime2 - nTime1) * MILLI, nTimeReadFromDisk * MICRO, fb_cache_hits);
     {
         CCoinsViewCache view(pcoinsTip.get());
         bool rv = ConnectBlock(blockConnecting, state, pindexNew, view, chainparams);
