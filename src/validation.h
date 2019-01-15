@@ -391,7 +391,6 @@ public:
 /** Initializes the script-execution cache */
 void InitScriptExecutionCache();
 
-
 /** Functions for disk access for blocks */
 std::shared_ptr<const CBlock> ReadBlockFromDisk(const CBlockIndex* pindex, const Consensus::Params& consensusParams);
 bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CDiskBlockPos& pos, const CMessageHeader::MessageStartChars& message_start);
