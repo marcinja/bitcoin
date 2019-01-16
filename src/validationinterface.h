@@ -15,6 +15,7 @@
 extern CCriticalSection cs_main;
 class CBlock;
 class CBlockIndex;
+class CBlockUndo;
 struct CBlockLocator;
 class CBlockIndex;
 class CConnman;
@@ -110,7 +111,10 @@ protected:
      *
      * Called on a background thread.
      */
-    virtual void BlockConnected(const std::shared_ptr<const CBlock> &block, const CBlockIndex *pindex, const std::vector<CTransactionRef> &txnConflicted) {}
+    virtual void BlockConnected(const std::shared_ptr<const CBlock> &block,
+								const CBlockIndex *pindex,
+								const std::shared_ptr<const CBlockUndo> &block_undo,
+								const std::vector<CTransactionRef> &txnConflicted) {}
     /**
      * Notifies listeners of a block being disconnected
      *
@@ -181,7 +185,10 @@ public:
 
     void UpdatedBlockTip(const CBlockIndex *, const CBlockIndex *, bool fInitialDownload);
     void TransactionAddedToMempool(const CTransactionRef &);
-    void BlockConnected(const std::shared_ptr<const CBlock> &, const CBlockIndex *pindex, const std::shared_ptr<const std::vector<CTransactionRef>> &);
+    void BlockConnected(const std::shared_ptr<const CBlock> &,
+						const CBlockIndex *pindex,
+						const std::shared_ptr<const CBlockUndo> &,
+						const std::shared_ptr<const std::vector<CTransactionRef>> &);
     void BlockDisconnected(const std::shared_ptr<const CBlock> &);
     void ChainStateFlushed(const CBlockLocator &);
     void Broadcast(int64_t nBestBlockTime, CConnman* connman);
