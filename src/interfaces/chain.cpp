@@ -181,6 +181,7 @@ public:
     }
     void BlockConnected(const std::shared_ptr<const CBlock>& block,
         const CBlockIndex* index,
+        const std::shared_ptr<const CBlockUndo> &block_undo,
         const std::vector<CTransactionRef>& tx_conflicted) override
     {
         m_notifications->BlockConnected(*block, tx_conflicted);

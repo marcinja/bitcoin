@@ -65,7 +65,7 @@ private:
     bool Commit();
 
 protected:
-    void BlockConnected(const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex,
+    void BlockConnected(const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex, const std::shared_ptr<const CBlockUndo> &block_undo,
                         const std::vector<CTransactionRef>& txn_conflicted) override;
 
     void ChainStateFlushed(const CBlockLocator& locator) override;
