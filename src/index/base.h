@@ -10,6 +10,7 @@
 #include <primitives/transaction.h>
 #include <threadinterrupt.h>
 #include <uint256.h>
+#include <undo.h>
 #include <validationinterface.h>
 
 class CBlockIndex;
@@ -54,6 +55,9 @@ private:
     std::thread m_thread_sync;
     CThreadInterrupt m_interrupt;
 
+    /// Whether the index needs to read block_undo files.
+    const bool m_needs_block_undo{false};
+
     /// Sync the index with the block index starting from the current best block.
     /// Intended to be run in its own thread, m_thread_sync, and can be
     /// interrupted with m_interrupt. Once the index gets in sync, the m_synced
@@ -80,8 +84,8 @@ protected:
     /// Initialize internal state from the database and block index.
     virtual bool Init();
 
-    /// Write update index entries for a newly connected block.
-    virtual bool WriteBlock(const CBlock& block, const CBlockIndex* pindex) { return true; }
+    /// Write update index entries for a newly connected block, and the corresponding block_undo.
+    virtual bool WriteBlock(const CBlock& block, const CBlockUndo& block_undo, const CBlockIndex* pindex) { return true; }
 
     /// Virtual method called internally by Commit that can be overridden to atomically
     /// commit more index state.

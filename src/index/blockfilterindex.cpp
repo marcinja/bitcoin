@@ -113,6 +113,7 @@ BlockFilterIndex::BlockFilterIndex(BlockFilterType filter_type,
 
 bool BlockFilterIndex::Init()
 {
+    m_needs_block_undo = true;
     if (!m_db->Read(DB_FILTER_POS, m_next_filter_pos)) {
         // Check that the cause of the read failure is that the key does not exist. Any other errors
         // indicate database corruption or a disk failure, and starting the index would cause
@@ -212,16 +213,11 @@ size_t BlockFilterIndex::WriteFilterToDisk(FlatFilePos& pos, const BlockFilter& 
     return data_size;
 }
 
-bool BlockFilterIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
+bool BlockFilterIndex::WriteBlock(const CBlock& block, const CBlockUndo& block_undo, const CBlockIndex* pindex)
 {
-    CBlockUndo block_undo;
     uint256 prev_header;
 
     if (pindex->nHeight > 0) {
-        if (!UndoReadFromDisk(block_undo, pindex)) {
-            return false;
-        }
-
         std::pair<uint256, DBVal> read_out;
         if (!m_db->Read(DBHeightKey(pindex->nHeight - 1), read_out)) {
             return false;
