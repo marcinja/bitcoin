@@ -1158,6 +1158,37 @@ bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CBlockIndex* pindex
     return ReadRawBlockFromDisk(block, block_pos, message_start);
 }
 
+bool UndoReadFromDisk(CBlockUndo& blockundo, const CBlockIndex *pindex)
+{
+    CDiskBlockPos pos = pindex->GetUndoPos();
+    if (pos.IsNull()) {
+        return error("%s: no undo data available", __func__);
+    }
+
+    // Open history file to read
+    CAutoFile filein(OpenUndoFile(pos, true), SER_DISK, CLIENT_VERSION);
+    if (filein.IsNull())
+        return error("%s: OpenUndoFile failed", __func__);
+
+    // Read block
+    uint256 hashChecksum;
+    CHashVerifier<CAutoFile> verifier(&filein); // We need a CHashVerifier as reserializing may lose data
+    try {
+        verifier << pindex->pprev->GetBlockHash();
+        verifier >> blockundo;
+        filein >> hashChecksum;
+    }
+    catch (const std::exception& e) {
+        return error("%s: Deserialize or I/O error - %s", __func__, e.what());
+    }
+
+    // Verify checksum
+    if (hashChecksum != verifier.GetHash())
+        return error("%s: Checksum mismatch", __func__);
+
+    return true;
+}
+
 CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
 {
     int halvings = nHeight / consensusParams.nSubsidyHalvingInterval;
@@ -1484,37 +1515,6 @@ bool UndoWriteToDisk(const CBlockUndo& blockundo, CDiskBlockPos& pos, const uint
     hasher << hashBlock;
     hasher << blockundo;
     fileout << hasher.GetHash();
-
-    return true;
-}
-
-static bool UndoReadFromDisk(CBlockUndo& blockundo, const CBlockIndex *pindex)
-{
-    CDiskBlockPos pos = pindex->GetUndoPos();
-    if (pos.IsNull()) {
-        return error("%s: no undo data available", __func__);
-    }
-
-    // Open history file to read
-    CAutoFile filein(OpenUndoFile(pos, true), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull())
-        return error("%s: OpenUndoFile failed", __func__);
-
-    // Read block
-    uint256 hashChecksum;
-    CHashVerifier<CAutoFile> verifier(&filein); // We need a CHashVerifier as reserializing may lose data
-    try {
-        verifier << pindex->pprev->GetBlockHash();
-        verifier >> blockundo;
-        filein >> hashChecksum;
-    }
-    catch (const std::exception& e) {
-        return error("%s: Deserialize or I/O error - %s", __func__, e.what());
-    }
-
-    // Verify checksum
-    if (hashChecksum != verifier.GetHash())
-        return error("%s: Checksum mismatch", __func__);
 
     return true;
 }
