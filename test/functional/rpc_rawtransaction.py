@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2014-2018 The Bitcoin Core developers
+# Copyright (c) 2014-2019 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test the rawtransaction RPCs.
@@ -10,6 +10,7 @@ Test the following RPCs:
    - sendrawtransaction
    - decoderawtransaction
    - getrawtransaction
+   - searchrawtransactions
 """
 
 from collections import OrderedDict
@@ -42,7 +43,7 @@ class RawTransactionsTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 3
-        self.extra_args = [["-addresstype=legacy"], ["-addresstype=legacy"], ["-addresstype=legacy"]]
+        self.extra_args = [["-addresstype=legacy", "-addrindex"], ["-addresstype=legacy"], ["-addresstype=legacy"]]
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -433,6 +434,43 @@ class RawTransactionsTest(BitcoinTestFramework):
         rawtx = ToHex(tx)
         decrawtx = self.nodes[0].decoderawtransaction(rawtx)
         assert_equal(decrawtx['version'], 0x7fffffff)
+
+        self._test_searchrawtransactions()
+
+    def _test_searchrawtransactions(self):
+        # Create 3 new outputs with the same address.
+        expected_txids = []
+        addr1 = self.nodes[1].getnewaddress()
+        expected_txids.append(self.nodes[0].sendtoaddress(addr1, 0.1))
+        expected_txids.append(self.nodes[0].sendtoaddress(addr1, 0.1))
+        expected_txids.append(self.nodes[0].sendtoaddress(addr1, 0.1))
+
+        self.nodes[0].generate(1)
+        self.sync_all()
+
+        res = self.nodes[0].searchrawtransactions(addr1, True)
+        spends_results, creations_results = res[0], res[1]
+
+        assert_equal(len(spends_results), 0)
+        assert_equal(len(creations_results), 3)
+
+        for c in creations_results:
+            # Since this output was created in the tx, its outpoint should have the same txid.
+            outpoint_txid = c['created_outpoint']['txid']
+            txid = c['txid']
+            assert_equal(outpoint_txid, txid)
+            assert(txid in expected_txids)
+
+        # Check that equivalent result is produced without verbose option set.
+        res = self.nodes[0].searchrawtransactions(addr1)
+        spends_results, creations_results = res[0], res[1]
+
+        assert_equal(len(spends_results), 0)
+        assert_equal(len(creations_results), 3)
+        for c in creations_results:
+            # Since this output was created in the tx, its outpoint should have the same txid.
+            outpoint_txid = c['created_outpoint']['txid']
+            assert(outpoint_txid in expected_txids)
 
 if __name__ == '__main__':
     RawTransactionsTest().main()
