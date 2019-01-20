@@ -211,7 +211,7 @@ bool TxIndex::Init()
     return BaseIndex::Init();
 }
 
-bool TxIndex::WriteBlock(const CBlock& block, const CBlockIndex* pindex)
+bool TxIndex::WriteBlock(const CBlock& block, const CBlockUndo& block_undo, const CBlockIndex* pindex)
 {
     // Exclude genesis block transaction because outputs are not spendable.
     if (pindex->nHeight == 0) return true;

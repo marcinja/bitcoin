@@ -129,7 +129,16 @@ void BaseIndex::ThreadSync()
                            __func__, pindex->GetBlockHash().ToString());
                 return;
             }
-            if (!WriteBlock(block, pindex)) {
+
+            CBlockUndo block_undo;
+            if (m_needs_block_undo && (*pindex->phashBlock != consensus_params.hashGenesisBlock)
+                    && !UndoReadFromDisk(block_undo, pindex)) {
+                FatalError("%s: Failed to read block undo %s from disk",
+                           __func__, pindex->GetBlockHash().ToString());
+                return;
+            }
+
+            if (!WriteBlock(block, block_undo, pindex)) {
                 FatalError("%s: Failed to write block %s to index database",
                            __func__, pindex->GetBlockHash().ToString());
                 return;
@@ -182,7 +191,7 @@ void BaseIndex::BlockConnected(const std::shared_ptr<const CBlock>& block, const
         }
     }
 
-    if (WriteBlock(*block, pindex)) {
+    if (WriteBlock(*block, *block_undo, pindex)) {
         m_best_block_index = pindex;
     } else {
         FatalError("%s: Failed to write block %s to index",
