@@ -1288,10 +1288,10 @@ static bool WriteBlockToDisk(const std::shared_ptr<const CBlock>& block, CDiskBl
 }
 
 static void PutBlockInFBCache(const std::shared_ptr<const CBlock>& block, const CBlockIndex* pindex) {
-    size_t new_block_size = 1000000;
+    size_t new_block_size = RecursiveDynamicUsage(block);
     LOCK(g_cs_full_block_cache);
     while (!g_full_block_cache.empty() && g_full_block_cache_size + memusage::DynamicUsage(g_full_block_cache) + new_block_size > (size_t)gArgs.GetArg("-blockcache", (int64_t)1000000*1024)) {
-        g_full_block_cache_size -= 1000000;
+        g_full_block_cache_size -= RecursiveDynamicUsage(g_full_block_cache.begin()->second);
         g_full_block_cache.erase(g_full_block_cache.begin());
     }
     g_full_block_cache_size += new_block_size;
@@ -1351,12 +1351,17 @@ static std::shared_ptr<const CBlock> ReadBlockFromDiskNoCache(const CDiskBlockPo
 
 static int fb_cache_hits = 0;
 static std::shared_ptr<const CBlock> GetBlockFromFBCache(const CBlockIndex* pindex) {
-
         LOCK(g_cs_full_block_cache);
         auto it = g_full_block_cache.find(pindex);
         if (it != g_full_block_cache.end()) {
             ++fb_cache_hits;
-            return it->second;
+            auto block = it->second;
+
+            // Remove the block from the cache to conserve memory.
+            g_full_block_cache.erase(it);
+            g_full_block_cache_size -= RecursiveDynamicUsage(block);
+
+            return block;
         } else {
             return nullptr;
         }
