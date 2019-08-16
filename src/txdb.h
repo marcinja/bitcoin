@@ -39,6 +39,8 @@ static const int64_t nMaxBlockDBCache = 2;
 static const int64_t nMaxTxIndexCache = 1024;
 //! Max memory allocated to all block filter index caches combined in MiB.
 static const int64_t max_filter_index_cache = 1024;
+//! Max memory allocated to the address index cache.
+static const int64_t nMaxAddrIndexCache = 1024;
 //! Max memory allocated to coin DB specific cache (MiB)
 static const int64_t nMaxCoinsDBCache = 8;
 

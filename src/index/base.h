@@ -43,6 +43,9 @@ protected:
         void WriteBestBlock(CDBBatch& batch, const CBlockLocator& locator);
     };
 
+    /// Whether the index needs to read block_undo files.
+    bool m_needs_block_undo{false};
+
 private:
     /// Whether the index is in sync with the main chain. The flag is flipped
     /// from false to true once, after which point this starts processing
@@ -54,9 +57,6 @@ private:
 
     std::thread m_thread_sync;
     CThreadInterrupt m_interrupt;
-
-    /// Whether the index needs to read block_undo files.
-    const bool m_needs_block_undo{false};
 
     /// Sync the index with the block index starting from the current best block.
     /// Intended to be run in its own thread, m_thread_sync, and can be

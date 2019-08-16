@@ -23,6 +23,7 @@
 #include <index/blockfilterindex.h>
 #include <index/txindex.h>
 #include <interfaces/chain.h>
+#include <index/addrindex.h>
 #include <key.h>
 #include <miner.h>
 #include <net.h>
@@ -167,6 +168,9 @@ void Interrupt()
     if (g_txindex) {
         g_txindex->Interrupt();
     }
+    if (g_addrindex) {
+        g_addrindex->Interrupt();
+    }
     ForEachBlockFilterIndex([](BlockFilterIndex& index) { index.Interrupt(); });
 }
 
@@ -199,6 +203,7 @@ void Shutdown(InitInterfaces& interfaces)
     if (peerLogic) UnregisterValidationInterface(peerLogic.get());
     if (g_connman) g_connman->Stop();
     if (g_txindex) g_txindex->Stop();
+    if (g_addrindex) g_addrindex->Stop();
     ForEachBlockFilterIndex([](BlockFilterIndex& index) { index.Stop(); });
 
     StopTorControl();
@@ -214,6 +219,7 @@ void Shutdown(InitInterfaces& interfaces)
     g_connman.reset();
     g_banman.reset();
     g_txindex.reset();
+    g_addrindex.reset();
     DestroyAllBlockFilterIndexes();
 
     if (::mempool.IsLoaded() && gArgs.GetArg("-persistmempool", DEFAULT_PERSIST_MEMPOOL)) {
@@ -394,6 +400,7 @@ void SetupServerArgs()
     hidden_args.emplace_back("-sysperms");
 #endif
     gArgs.AddArg("-txindex", strprintf("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)", DEFAULT_TXINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-addrindex", strprintf("Maintain a full address index, used by the searchrawtransactions rpc call (default: %u)", DEFAULT_ADDRINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     gArgs.AddArg("-blockfilterindex=<type>",
                  strprintf("Maintain an index of compact filters by block (default: %s, values: %s).", DEFAULT_BLOCKFILTERINDEX, ListBlockFilterTypes()) +
                  " If <type> is not supplied or if <type> = 1, indexes for all known types are enabled.",
@@ -964,6 +971,8 @@ bool AppInitParameterInteraction()
     if (gArgs.GetArg("-prune", 0)) {
         if (gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX))
             return InitError(_("Prune mode is incompatible with -txindex.").translated);
+        if (gArgs.GetBoolArg("-addrindex", DEFAULT_ADDRINDEX))
+            return InitError(_("Prune mode is incompatible with -addrindex.").translated);
         if (!g_enabled_filter_types.empty()) {
             return InitError(_("Prune mode is incompatible with -blockfilterindex.").translated);
         }
@@ -1440,6 +1449,8 @@ bool AppInitMain(InitInterfaces& interfaces)
         filter_index_cache = max_cache / n_indexes;
         nTotalCache -= filter_index_cache * n_indexes;
     }
+    int64_t nAddrIndexCache = std::min(nTotalCache / 8, gArgs.GetBoolArg("-addrindex", DEFAULT_TXINDEX) ? nMaxAddrIndexCache << 20 : 0);
+    nTotalCache -= nAddrIndexCache;
     int64_t nCoinDBCache = std::min(nTotalCache / 2, (nTotalCache / 4) + (1 << 23)); // use 25%-50% of the remainder for disk cache
     nCoinDBCache = std::min(nCoinDBCache, nMaxCoinsDBCache << 20); // cap total coins db cache
     nTotalCache -= nCoinDBCache;
@@ -1456,6 +1467,10 @@ bool AppInitMain(InitInterfaces& interfaces)
     }
     LogPrintf("* Using %.1f MiB for chain state database\n", nCoinDBCache * (1.0 / 1024 / 1024));
     LogPrintf("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)\n", nCoinCacheUsage * (1.0 / 1024 / 1024), nMempoolSizeMax * (1.0 / 1024 / 1024));
+
+    if (gArgs.GetBoolArg("-addrindex", DEFAULT_ADDRINDEX)) {
+        LogPrintf("* Using %.1f MiB for address index database\n", nAddrIndexCache * (1.0 / 1024 / 1024));
+    }
 
     bool fLoaded = false;
     while (!fLoaded && !ShutdownRequested()) {
@@ -1651,6 +1666,11 @@ bool AppInitMain(InitInterfaces& interfaces)
     if (gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
         g_txindex = MakeUnique<TxIndex>(nTxIndexCache, false, fReindex);
         g_txindex->Start();
+    }
+
+    if (gArgs.GetBoolArg("-addrindex", DEFAULT_ADDRINDEX)) {
+        g_addrindex = MakeUnique<AddrIndex>(nAddrIndexCache, false, fReindex);
+        g_addrindex->Start();
     }
 
     for (const auto& filter_type : g_enabled_filter_types) {
