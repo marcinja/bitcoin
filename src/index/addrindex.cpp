@@ -4,7 +4,7 @@
 
 #include <dbwrapper.h>
 #include <hash.h>
-#include <index/addr_index.h>
+#include <index/addrindex.h>
 #include <index/disktxpos.h>
 #include <shutdown.h>
 #include <primitives/transaction.h>
@@ -18,7 +18,7 @@
 
 #include <boost/thread.hpp>
 
-std::unique_ptr<addr_index> g_addr_index;
+std::unique_ptr<AddrIndex> g_addr_index;
 
 static constexpr char DB_ADDR_INDEX = 'a';
 
